@@ -1,0 +1,30 @@
+{
+  "name": "dl-bonustrackingdb",
+  "version": "0.1.0",
+  "private": true,
+  "description": "CSM bonus tracking dashboard (GTM-2495) — Salesforce-backed metrics for logo churn, conversions, QBR coverage, NPS, meaningful connections, save rate, and CSAT.",
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "next lint",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "next": "^15.0.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
+  },
+  "devDependencies": {
+    "@eslint/eslintrc": "^3.1.0",
+    "@types/node": "^22.0.0",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "eslint": "^9.0.0",
+    "eslint-config-next": "^15.0.0",
+    "typescript": "^5.6.0"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
