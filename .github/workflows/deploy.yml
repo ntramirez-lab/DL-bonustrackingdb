@@ -1,25 +1,35 @@
 name: deploy
 
-# Placeholder — only builds until the deploy target is configured.
+# DeployBay's in-cluster Kaniko build fails for this repo, so the image is
+# built here and pushed to GHCR; DeployBay pulls the pre-built image.
 
 on:
   push:
     branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
 
 jobs:
-  build:
+  image:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/setup-node@v4
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
         with:
-          node-version: "20"
-          cache: "npm"
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
-      - run: npm ci
-      - run: npm run build
-        env:
-          USE_MOCK_DATA: "true"
-
-      - run: echo "Deploy not configured yet — build verified, nothing deployed."
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          platforms: linux/amd64
+          tags: ghcr.io/ntramirez-lab/dl-bonustrackingdb:latest
+          labels: org.opencontainers.image.source=https://github.com/ntramirez-lab/DL-bonustrackingdb
