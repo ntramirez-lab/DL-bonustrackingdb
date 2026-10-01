@@ -73,58 +73,82 @@ export default async function DashboardPage({ searchParams }: { searchParams: Se
   const metrics = await getBonusMetrics(windowStart, windowEnd);
 
   return (
-    <main className="page">
-      <div className="page-header">
-        <h1>CSM Bonus Tracking</h1>
-        <p>
-          Data source: {metrics.source === "mock" ? "mock (Salesforce not configured — see .env.example)" : "Salesforce"}
-          {" · "}
-          {metrics.windowStart} to {metrics.windowEnd} (end exclusive)
-          {" · "}generated {new Date(metrics.generatedAt).toLocaleString()}
-        </p>
-        <p>
-          <a href={`?quarter=${quarter - 1}`}>← Previous quarter</a>
-          {quarter < 0 && (
-            <>
-              {" · "}
-              <a href={`?quarter=${quarter + 1}`}>Next quarter →</a>
-            </>
-          )}
-        </p>
+    <>
+      <header className="app-header">
+        <div className="app-header-inner">
+          <div className="app-logo">
+            {/* eslint-disable-next-line @next/next/no-img-element -- external brand logo, no optimization needed */}
+            <img
+              src="https://lirp.cdn-website.com/fafc74b3/dms3rep/multi/opt/doorloop-white-logo-transparent-4x-1920w.png"
+              alt="DoorLoop"
+            />
+            <span className="app-logo-divider" aria-hidden="true" />
+            <span className="app-logo-text">Customer Success</span>
+          </div>
+          <span className={`source-pill ${metrics.source === "mock" ? "source-mock" : "source-live"}`}>
+            {metrics.source === "mock" ? "Mock data" : "Live · Salesforce"}
+          </span>
+        </div>
+      </header>
+
+      <div className="hero">
+        <div className="hero-inner">
+          <div>
+            <p className="eyebrow">Kainos KPIs &amp; Comp</p>
+            <h1>CSM Bonus Tracking</h1>
+            <p className="hero-meta">
+              {metrics.windowStart} to {metrics.windowEnd} (end exclusive)
+              {" · "}updated {new Date(metrics.generatedAt).toLocaleString()}
+              {metrics.source === "mock" && " · Salesforce not configured, see .env.example"}
+            </p>
+          </div>
+          <nav className="quarter-nav" aria-label="Quarter">
+            <a className="btn" href={`?quarter=${quarter - 1}`}>
+              ← Previous quarter
+            </a>
+            {quarter < 0 && (
+              <a className="btn" href={`?quarter=${quarter + 1}`}>
+                Next quarter →
+              </a>
+            )}
+          </nav>
+        </div>
       </div>
 
-      <TileSection title="Logo churn (lower is better)" section={metrics.logoChurn} />
-      <TileSection title="Net monthly → annual conversions" section={metrics.netConversions} />
-      <TileSection
-        title="QBR coverage"
-        section={metrics.qbrCoverage}
-        emptyNote="No CX Events with category “Account Review” completed in this window. QBRs only count when logged under that category."
-      />
-      <TileSection title="NPS" section={metrics.nps} />
-      <TileSection title="Save rate" section={metrics.saveRate} unit="%" />
-      <TileSection
-        title="CSAT"
-        section={metrics.csat}
-        decimals={1}
-        emptyNote="No CSAT responses (survey CX-CSAT) in this window."
-      />
+      <main className="page">
+        <TileSection title="Logo churn (lower is better)" section={metrics.logoChurn} />
+        <TileSection title="Net monthly → annual conversions" section={metrics.netConversions} />
+        <TileSection
+          title="QBR coverage"
+          section={metrics.qbrCoverage}
+          emptyNote="No CX Events with category “Account Review” completed in this window. QBRs only count when logged under that category."
+        />
+        <TileSection title="NPS" section={metrics.nps} />
+        <TileSection title="Save rate" section={metrics.saveRate} unit="%" />
+        <TileSection
+          title="CSAT"
+          section={metrics.csat}
+          decimals={1}
+          emptyNote="No CSAT responses (survey CX-CSAT) in this window."
+        />
 
-      <section className="section">
-        <h2>Meaningful connections / Zoom minutes</h2>
-        <div className="gap-card">
-          <strong>Not wired up yet.</strong> {metrics.meaningfulConnections.note}
-          <ul>
-            {metrics.meaningfulConnections.candidates.map((c) => (
-              <li key={c}>{c}</li>
-            ))}
-          </ul>
-        </div>
-      </section>
+        <section className="section">
+          <h2>Meaningful connections / Zoom minutes</h2>
+          <div className="gap-card">
+            <strong>Not wired up yet.</strong> {metrics.meaningfulConnections.note}
+            <ul>
+              {metrics.meaningfulConnections.candidates.map((c) => (
+                <li key={c}>{c}</li>
+              ))}
+            </ul>
+          </div>
+        </section>
 
-      <p className="footer-note">
-        Field mapping: GTM-2496 · Dashboard: GTM-2495 · Metric source-of-truth is the salesforce repo&apos;s
-        force-app/main/default/objects metadata — re-check there if a query here stops matching prod.
-      </p>
-    </main>
+        <p className="footer-note">
+          Field mapping: GTM-2496 · Dashboard: GTM-2495 · Metric source-of-truth is the salesforce repo&apos;s
+          force-app/main/default/objects metadata — re-check there if a query here stops matching prod.
+        </p>
+      </main>
+    </>
   );
 }

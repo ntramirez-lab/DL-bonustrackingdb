@@ -1,45 +1,37 @@
+/* DoorLoop brand palette — same tokens as the DBR generator
+   (ntramirez-lab/DL-dbr-generator). Light theme only, per brand. */
 :root {
   color-scheme: light;
-  --page-plane: #f9f9f7;
-  --surface-1: #fcfcfb;
-  --text-primary: #0b0b0b;
-  --text-secondary: #52514e;
-  --text-muted: #898781;
-  --gridline: #e1e0d9;
-  --border: rgba(11, 11, 11, 0.1);
 
-  --status-good: #0ca30c;
-  --status-warning: #fab219;
-  --status-serious: #ec835a;
-  --status-critical: #d03b3b;
+  --dl-blue: #3185fc;
+  --dl-blue-deep: #004fbd;
+  --dl-navy: #162050;
+  --dl-navy-soft: #1b2c74;
+  --dl-neon: #dffe02;
+  --dl-pink: #ff4998;
+  --dl-light-blue: #dbeaff;
+  --dl-light-blue-2: #f3f8ff;
+  --dl-cloud: #f0efeb;
+  --dl-cloud-2: #f8f6f3;
+  --dl-white: #ffffff;
+  --dl-border: #e9e8e4;
+  --dl-text-muted: #6b7388;
 
-  --series-1: #2a78d6; /* blue — used for neutral/no-target figures */
-}
+  --page-plane: var(--dl-cloud-2);
+  --surface-1: var(--dl-white);
+  --text-primary: var(--dl-navy);
+  --text-secondary: #3a4566;
+  --text-muted: var(--dl-text-muted);
+  --border: var(--dl-border);
 
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) {
-    color-scheme: dark;
-    --page-plane: #0d0d0d;
-    --surface-1: #1a1a19;
-    --text-primary: #ffffff;
-    --text-secondary: #c3c2b7;
-    --text-muted: #898781;
-    --gridline: #2c2c2a;
-    --border: rgba(255, 255, 255, 0.1);
-    --series-1: #3987e5;
-  }
-}
+  /* Status colors stay semantic (green → red); tuned to sit next to navy. */
+  --status-good: #0f9d58;
+  --status-warning: #e8a400;
+  --status-serious: #f2733a;
+  --status-critical: #d6334a;
 
-:root[data-theme="dark"] {
-  color-scheme: dark;
-  --page-plane: #0d0d0d;
-  --surface-1: #1a1a19;
-  --text-primary: #ffffff;
-  --text-secondary: #c3c2b7;
-  --text-muted: #898781;
-  --gridline: #2c2c2a;
-  --border: rgba(255, 255, 255, 0.1);
-  --series-1: #3987e5;
+  --series-1: var(--dl-blue);
+  --font: var(--font-poppins), "Poppins", system-ui, -apple-system, "Segoe UI", sans-serif;
 }
 
 * {
@@ -50,31 +42,150 @@ body {
   margin: 0;
   background: var(--page-plane);
   color: var(--text-primary);
-  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  font-family: var(--font);
+  -webkit-font-smoothing: antialiased;
 }
+
+a {
+  color: var(--dl-blue);
+}
+
+a:hover {
+  color: var(--dl-pink);
+}
+
+/* --- Header ------------------------------------------------------------- */
+
+.app-header {
+  background: var(--dl-navy);
+  color: var(--dl-white);
+}
+
+.app-header-inner {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 14px 16px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.app-logo {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+.app-logo img {
+  height: 26px;
+  width: auto;
+  display: block;
+}
+
+.app-logo-divider {
+  width: 1px;
+  height: 20px;
+  background: rgba(255, 255, 255, 0.25);
+}
+
+.app-logo-text {
+  font-size: 14px;
+  font-weight: 500;
+  color: rgba(255, 255, 255, 0.85);
+  white-space: nowrap;
+}
+
+.source-pill {
+  font-size: 12px;
+  font-weight: 600;
+  padding: 5px 12px;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+
+.source-live {
+  background: var(--dl-neon);
+  color: var(--dl-navy);
+}
+
+.source-mock {
+  background: rgba(255, 255, 255, 0.12);
+  color: var(--dl-white);
+  border: 1px solid rgba(255, 255, 255, 0.25);
+}
+
+/* --- Hero --------------------------------------------------------------- */
+
+.hero {
+  background: linear-gradient(180deg, var(--dl-light-blue-2) 0%, var(--page-plane) 100%);
+  border-bottom: 1px solid var(--border);
+}
+
+.hero-inner {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 28px 16px 24px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.eyebrow {
+  margin: 0 0 6px;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--dl-blue);
+}
+
+.hero h1 {
+  margin: 0;
+  font-size: 28px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+.hero-meta {
+  margin: 6px 0 0;
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+.quarter-nav {
+  display: flex;
+  gap: 8px;
+}
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  padding: 8px 14px;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  text-decoration: none;
+  background: var(--surface-1);
+  color: var(--dl-navy);
+  border: 1px solid var(--border);
+}
+
+.btn:hover {
+  color: var(--dl-navy);
+  border-color: var(--dl-blue);
+  background: var(--dl-light-blue-2);
+}
+
+/* --- Content ------------------------------------------------------------ */
 
 .page {
   max-width: 1100px;
   margin: 0 auto;
-  padding: 32px 16px 64px;
-}
-
-.page-header {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  margin-bottom: 28px;
-}
-
-.page-header h1 {
-  font-size: 22px;
-  margin: 0;
-}
-
-.page-header p {
-  margin: 0;
-  color: var(--text-secondary);
-  font-size: 14px;
+  padding: 28px 16px 64px;
 }
 
 .section {
@@ -82,12 +193,23 @@ body {
 }
 
 .section h2 {
-  font-size: 15px;
+  font-size: 13px;
   font-weight: 600;
-  color: var(--text-secondary);
+  color: var(--dl-navy);
   text-transform: uppercase;
-  letter-spacing: 0.02em;
+  letter-spacing: 0.08em;
   margin: 0 0 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.section h2::before {
+  content: "";
+  width: 4px;
+  height: 14px;
+  border-radius: 2px;
+  background: var(--dl-blue);
 }
 
 .tile-grid {
@@ -99,22 +221,32 @@ body {
 .tile {
   background: var(--surface-1);
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: 12px;
   padding: 16px;
   display: flex;
   flex-direction: column;
   gap: 6px;
+  box-shadow: 0 1px 2px rgba(22, 32, 80, 0.04);
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+
+.tile:hover {
+  border-color: var(--dl-light-blue);
+  box-shadow: 0 4px 14px rgba(22, 32, 80, 0.08);
 }
 
 .tile-csm {
   font-size: 13px;
+  font-weight: 500;
   color: var(--text-secondary);
 }
 
 .tile-value {
-  font-size: 28px;
-  font-weight: 600;
-  font-variant-numeric: proportional-nums;
+  font-size: 30px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: var(--dl-navy);
+  font-variant-numeric: tabular-nums;
 }
 
 .tile-target {
@@ -129,36 +261,40 @@ body {
   font-size: 12px;
   font-weight: 600;
   width: fit-content;
+  padding: 3px 10px 3px 8px;
+  border-radius: 999px;
+  margin-top: 4px;
 }
 
 .status-dot {
-  width: 8px;
-  height: 8px;
+  width: 7px;
+  height: 7px;
   border-radius: 50%;
   flex-shrink: 0;
 }
+
+.status-good { color: var(--status-good); background: color-mix(in srgb, var(--status-good) 10%, white); }
+.status-warning { color: color-mix(in srgb, var(--status-warning) 70%, var(--dl-navy)); background: color-mix(in srgb, var(--status-warning) 14%, white); }
+.status-serious { color: color-mix(in srgb, var(--status-serious) 85%, var(--dl-navy)); background: color-mix(in srgb, var(--status-serious) 12%, white); }
+.status-critical { color: var(--status-critical); background: color-mix(in srgb, var(--status-critical) 10%, white); }
 
 .status-good .status-dot { background: var(--status-good); }
 .status-warning .status-dot { background: var(--status-warning); }
 .status-serious .status-dot { background: var(--status-serious); }
 .status-critical .status-dot { background: var(--status-critical); }
 
-.status-good { color: var(--status-good); }
-.status-warning { color: color-mix(in srgb, var(--status-warning) 65%, var(--text-primary)); }
-.status-serious { color: var(--status-serious); }
-.status-critical { color: var(--status-critical); }
-
 .gap-card {
-  background: var(--surface-1);
-  border: 1px dashed var(--border);
-  border-radius: 10px;
+  background: var(--dl-light-blue-2);
+  border: 1px dashed var(--dl-light-blue);
+  border-radius: 12px;
   padding: 16px;
   color: var(--text-secondary);
   font-size: 13px;
+  line-height: 1.5;
 }
 
 .gap-card strong {
-  color: var(--text-primary);
+  color: var(--dl-navy);
 }
 
 .gap-card ul {
@@ -170,4 +306,17 @@ body {
   color: var(--text-muted);
   font-size: 12px;
   margin-top: 40px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border);
+}
+
+@media (max-width: 560px) {
+  .app-logo-divider,
+  .app-logo-text {
+    display: none;
+  }
+
+  .hero h1 {
+    font-size: 24px;
+  }
 }
