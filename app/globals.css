@@ -1,25 +1,22 @@
-/* DoorLoop brand palette — same tokens as the DBR generator
-   (ntramirez-lab/DL-dbr-generator). Light theme only, per brand. */
+/* DoorLoop CX theme — matches the First 90 Days Hub
+   (first-90-days.shuang.apps.deploybay.doorloop.com). Light theme only, per brand. */
 :root {
   color-scheme: light;
 
   --dl-blue: #3185fc;
-  --dl-blue-deep: #004fbd;
-  --dl-navy: #162050;
-  --dl-navy-soft: #1b2c74;
+  --dl-blue-deep: #1f6fe0;
+  --dl-navy: #1b2a6b;
+  --dl-ink: #16204d;
   --dl-neon: #dffe02;
-  --dl-pink: #ff4998;
-  --dl-light-blue: #dbeaff;
-  --dl-light-blue-2: #f3f8ff;
-  --dl-cloud: #f0efeb;
-  --dl-cloud-2: #f8f6f3;
+  --dl-lavender: #eef2fd;
+  --dl-lavender-2: #e3eafc;
   --dl-white: #ffffff;
-  --dl-border: #e9e8e4;
+  --dl-border: #e3e6ef;
   --dl-text-muted: #6b7388;
 
-  --page-plane: var(--dl-cloud-2);
+  --page-plane: var(--dl-white);
   --surface-1: var(--dl-white);
-  --text-primary: var(--dl-navy);
+  --text-primary: var(--dl-ink);
   --text-secondary: #3a4566;
   --text-muted: var(--dl-text-muted);
   --border: var(--dl-border);
@@ -30,8 +27,7 @@
   --status-serious: #f2733a;
   --status-critical: #d6334a;
 
-  --series-1: var(--dl-blue);
-  --font: var(--font-poppins), "Poppins", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font: var(--font-inter), "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
 }
 
 * {
@@ -50,207 +46,345 @@ a {
   color: var(--dl-blue);
 }
 
-a:hover {
-  color: var(--dl-pink);
-}
-
-/* --- Header ------------------------------------------------------------- */
-
-.app-header {
-  background: var(--dl-navy);
-  color: var(--dl-white);
-}
-
-.app-header-inner {
-  max-width: 1100px;
+.wrap {
+  max-width: 1180px;
   margin: 0 auto;
-  padding: 14px 16px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
+  padding: 0 16px;
 }
 
-.app-logo {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  min-width: 0;
-}
+/* --- Top bar ------------------------------------------------------------ */
 
-.app-logo img {
-  height: 26px;
-  width: auto;
-  display: block;
-}
-
-.app-logo-divider {
-  width: 1px;
-  height: 20px;
-  background: rgba(255, 255, 255, 0.25);
-}
-
-.app-logo-text {
-  font-size: 14px;
-  font-weight: 500;
-  color: rgba(255, 255, 255, 0.85);
-  white-space: nowrap;
-}
-
-.source-pill {
-  font-size: 12px;
-  font-weight: 600;
-  padding: 5px 12px;
-  border-radius: 999px;
-  white-space: nowrap;
-}
-
-.source-live {
-  background: var(--dl-neon);
-  color: var(--dl-navy);
-}
-
-.source-mock {
-  background: rgba(255, 255, 255, 0.12);
+.topbar {
+  background: var(--dl-ink);
   color: var(--dl-white);
-  border: 1px solid rgba(255, 255, 255, 0.25);
+  font-size: 14px;
+  text-align: center;
+  padding: 7px 16px;
+}
+
+.topbar strong {
+  color: var(--dl-neon);
+  font-weight: 700;
 }
 
 /* --- Hero --------------------------------------------------------------- */
 
 .hero {
-  background: linear-gradient(180deg, var(--dl-light-blue-2) 0%, var(--page-plane) 100%);
-  border-bottom: 1px solid var(--border);
+  position: relative;
+  overflow: hidden;
+  background: var(--dl-lavender);
+}
+
+/* Oversized, faded DoorLoop loop shapes behind the hero copy. */
+.hero-art {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(circle at 12% 30%, transparent 0 70px, var(--dl-lavender-2) 71px 150px, transparent 151px),
+    radial-gradient(circle at 88% 22%, transparent 0 60px, var(--dl-lavender-2) 61px 140px, transparent 141px);
+  opacity: 0.9;
 }
 
 .hero-inner {
-  max-width: 1100px;
-  margin: 0 auto;
-  padding: 28px 16px 24px;
-  display: flex;
-  flex-wrap: wrap;
-  align-items: flex-end;
-  justify-content: space-between;
-  gap: 16px;
+  position: relative;
+  padding-top: 56px;
+  padding-bottom: 48px;
 }
 
 .eyebrow {
-  margin: 0 0 6px;
-  font-size: 12px;
-  font-weight: 600;
-  letter-spacing: 0.12em;
+  margin: 0 0 10px;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
   text-transform: uppercase;
   color: var(--dl-blue);
 }
 
 .hero h1 {
   margin: 0;
-  font-size: 28px;
-  font-weight: 700;
+  font-size: 34px;
+  font-weight: 800;
   letter-spacing: -0.02em;
+  color: var(--dl-ink);
+}
+
+.lede {
+  margin: 14px 0 22px;
+  max-width: 720px;
+  font-size: 16px;
+  line-height: 1.65;
+  color: var(--text-muted);
 }
 
 .hero-meta {
   margin: 6px 0 0;
-  font-size: 13px;
+  font-size: 14px;
   color: var(--text-muted);
 }
 
-.quarter-nav {
+.hero-meta strong {
+  color: var(--dl-ink);
+  font-weight: 600;
+}
+
+/* --- Period pills + date range ------------------------------------------ */
+
+.pills {
   display: flex;
-  gap: 8px;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 9px 18px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--surface-1);
+  color: var(--dl-ink);
+  font-size: 15px;
+  font-weight: 500;
+  text-decoration: none;
+}
+
+.pill:hover {
+  border-color: var(--dl-blue);
+}
+
+.pill-active,
+.pill-active:hover {
+  border: 2px solid var(--dl-blue);
+  padding: 8px 17px;
+  color: var(--dl-blue);
+  font-weight: 600;
+}
+
+.range {
+  margin: 16px 0 18px;
+}
+
+.range summary {
+  cursor: pointer;
+  color: var(--dl-blue);
+  font-size: 15px;
+  font-weight: 500;
+  list-style: none;
+  width: fit-content;
+}
+
+.range summary::-webkit-details-marker {
+  display: none;
+}
+
+.range summary::before {
+  content: "▸";
+  display: inline-block;
+  margin-right: 6px;
+  transition: transform 0.15s;
+}
+
+.range[open] summary::before {
+  transform: rotate(90deg);
+}
+
+.range-form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.range-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-muted);
+}
+
+.range-form input {
+  padding: 9px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--surface-1);
+  color: var(--text-primary);
+  font-family: inherit;
+  font-size: 14px;
+}
+
+.range-form input:focus {
+  outline: 2px solid var(--dl-blue);
+  outline-offset: 1px;
 }
 
 .btn {
   display: inline-flex;
   align-items: center;
-  padding: 8px 14px;
-  border-radius: 8px;
-  font-size: 13px;
+  padding: 10px 22px;
+  border-radius: 10px;
+  font-family: inherit;
+  font-size: 15px;
   font-weight: 600;
   text-decoration: none;
-  background: var(--surface-1);
-  color: var(--dl-navy);
+  cursor: pointer;
   border: 1px solid var(--border);
+  background: var(--surface-1);
+  color: var(--dl-ink);
 }
 
-.btn:hover {
-  color: var(--dl-navy);
-  border-color: var(--dl-blue);
-  background: var(--dl-light-blue-2);
+.btn-neon {
+  background: var(--dl-neon);
+  border-color: var(--dl-neon);
+  color: var(--dl-ink);
 }
 
-/* --- Content ------------------------------------------------------------ */
-
-.page {
-  max-width: 1100px;
-  margin: 0 auto;
-  padding: 28px 16px 64px;
+.btn-neon:hover {
+  filter: brightness(0.96);
 }
 
-.section {
-  margin-bottom: 32px;
+/* --- Bands (alternating white / lavender sections) ---------------------- */
+
+.band {
+  padding: 48px 0;
 }
 
-.section h2 {
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--dl-navy);
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  margin: 0 0 12px;
+.band-tint {
+  background: var(--dl-lavender);
+}
+
+.band h2 {
+  margin: 0;
+  font-size: 26px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  color: var(--dl-ink);
+}
+
+.band-sub {
+  margin: 8px 0 24px;
+  font-size: 15px;
+  color: var(--text-muted);
+}
+
+/* --- Team summary cards ------------------------------------------------- */
+
+.kpi-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+  gap: 16px;
+  margin-bottom: 24px;
+}
+
+.kpi {
+  border-radius: 16px;
+  padding: 22px 22px 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  color: var(--dl-white);
+}
+
+.kpi-navy { background: var(--dl-navy); }
+.kpi-blue { background: var(--dl-blue); }
+.kpi-neon { background: var(--dl-neon); color: var(--dl-ink); }
+.kpi-ink { background: var(--dl-ink); }
+
+.kpi-label {
+  font-size: 15px;
+  font-weight: 500;
+}
+
+.kpi-value {
+  font-size: 42px;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  line-height: 1.1;
+  font-variant-numeric: tabular-nums;
+}
+
+.kpi-sub {
+  font-size: 14px;
+  font-weight: 500;
+  opacity: 0.85;
+}
+
+/* --- Panels ------------------------------------------------------------- */
+
+.panels {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.panel {
+  background: var(--surface-1);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 22px 24px 24px;
+}
+
+.panel h3 {
+  margin: 0 0 16px;
+  font-size: 19px;
+  font-weight: 700;
+  color: var(--dl-ink);
   display: flex;
   align-items: center;
   gap: 8px;
 }
 
-.section h2::before {
-  content: "";
-  width: 4px;
-  height: 14px;
-  border-radius: 2px;
-  background: var(--dl-blue);
+.info {
+  display: inline-grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  border: 1.5px solid var(--dl-blue);
+  color: var(--dl-blue);
+  font-size: 12px;
+  font-weight: 600;
+  font-style: normal;
+  cursor: help;
+  flex-shrink: 0;
 }
 
 .tile-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
   gap: 12px;
 }
 
 .tile {
-  background: var(--surface-1);
   border: 1px solid var(--border);
   border-radius: 12px;
-  padding: 16px;
+  padding: 16px 18px;
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  box-shadow: 0 1px 2px rgba(22, 32, 80, 0.04);
-  transition: border-color 0.15s, box-shadow 0.15s;
-}
-
-.tile:hover {
-  border-color: var(--dl-light-blue);
-  box-shadow: 0 4px 14px rgba(22, 32, 80, 0.08);
+  gap: 4px;
 }
 
 .tile-csm {
-  font-size: 13px;
-  font-weight: 500;
+  font-size: 14px;
+  font-weight: 600;
   color: var(--text-secondary);
 }
 
 .tile-value {
   font-size: 30px;
-  font-weight: 700;
+  font-weight: 800;
   letter-spacing: -0.02em;
-  color: var(--dl-navy);
+  color: var(--dl-ink);
   font-variant-numeric: tabular-nums;
 }
 
-.tile-target {
-  font-size: 12px;
+.tile-meta {
+  font-size: 13px;
   color: var(--text-muted);
 }
 
@@ -263,7 +397,7 @@ a:hover {
   width: fit-content;
   padding: 3px 10px 3px 8px;
   border-radius: 999px;
-  margin-top: 4px;
+  margin-top: 6px;
 }
 
 .status-dot {
@@ -274,8 +408,8 @@ a:hover {
 }
 
 .status-good { color: var(--status-good); background: color-mix(in srgb, var(--status-good) 10%, white); }
-.status-warning { color: color-mix(in srgb, var(--status-warning) 70%, var(--dl-navy)); background: color-mix(in srgb, var(--status-warning) 14%, white); }
-.status-serious { color: color-mix(in srgb, var(--status-serious) 85%, var(--dl-navy)); background: color-mix(in srgb, var(--status-serious) 12%, white); }
+.status-warning { color: color-mix(in srgb, var(--status-warning) 70%, var(--dl-ink)); background: color-mix(in srgb, var(--status-warning) 14%, white); }
+.status-serious { color: color-mix(in srgb, var(--status-serious) 85%, var(--dl-ink)); background: color-mix(in srgb, var(--status-serious) 12%, white); }
 .status-critical { color: var(--status-critical); background: color-mix(in srgb, var(--status-critical) 10%, white); }
 
 .status-good .status-dot { background: var(--status-good); }
@@ -283,40 +417,53 @@ a:hover {
 .status-serious .status-dot { background: var(--status-serious); }
 .status-critical .status-dot { background: var(--status-critical); }
 
-.gap-card {
-  background: var(--dl-light-blue-2);
-  border: 1px dashed var(--dl-light-blue);
+.note {
+  background: var(--dl-lavender);
   border-radius: 12px;
-  padding: 16px;
+  padding: 16px 18px;
   color: var(--text-secondary);
-  font-size: 13px;
-  line-height: 1.5;
+  font-size: 14px;
+  line-height: 1.55;
 }
 
-.gap-card strong {
-  color: var(--dl-navy);
+.note strong {
+  color: var(--dl-ink);
 }
 
-.gap-card ul {
+.note ul {
   margin: 8px 0 0;
   padding-left: 18px;
 }
 
-.footer-note {
+/* --- Footer ------------------------------------------------------------- */
+
+.footer {
+  background: #eceef5;
   color: var(--text-muted);
-  font-size: 12px;
-  margin-top: 40px;
-  padding-top: 16px;
-  border-top: 1px solid var(--border);
+  font-size: 13px;
+  line-height: 1.6;
+  padding: 28px 0 36px;
 }
 
-@media (max-width: 560px) {
-  .app-logo-divider,
-  .app-logo-text {
-    display: none;
+@media (max-width: 640px) {
+  .hero-inner {
+    padding-top: 36px;
+    padding-bottom: 32px;
   }
 
   .hero h1 {
-    font-size: 24px;
+    font-size: 28px;
+  }
+
+  .band h2 {
+    font-size: 22px;
+  }
+
+  .panel {
+    padding: 18px 16px;
+  }
+
+  .kpi-value {
+    font-size: 34px;
   }
 }

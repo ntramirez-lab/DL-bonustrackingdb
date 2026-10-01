@@ -9,6 +9,7 @@ export async function GET(request: Request) {
   const { windowStart, windowEnd } = resolveWindow({
     from: searchParams.get("from"),
     to: searchParams.get("to"),
+    through: searchParams.get("through"),
     quarter: searchParams.get("quarter"),
   });
 
