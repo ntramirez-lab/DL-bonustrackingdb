@@ -8,6 +8,11 @@ export interface CsmMetric {
   csm: string;
   value: number;
   target?: number;
+  // Optional context line under the value, e.g. "12 of 40 accounts".
+  detail?: string;
+  // Raw numerator/denominator behind a ratio metric, so team totals can be
+  // pooled (sum of parts) instead of averaging per-CSM percentages.
+  parts?: { num: number; den: number };
   status: "good" | "warning" | "serious" | "critical";
 }
 
@@ -129,16 +134,48 @@ const NET_CONVERSIONS_SOQL = (windowStart: string, windowEnd: string) => `
   GROUP BY ${CSM_GROUP("Account__r.")}, Starting_Price_Interval__c, Ending_Price_Interval__c
 `;
 
-// 3. QBR coverage — CX_Event__c records categorized "Account Review"
-// ("Business Review with DoorLoop", confirmed 2026-09-28), completed in
-// the period, vs. the CSM's active book size.
+// 3. QBR coverage — % of each CSM's active book that had at least one
+// CX_Event__c categorized "Account Review" ("Business Review with DoorLoop",
+// confirmed 2026-09-28) completed in the period.
+// Book = accounts currently attributed to the CSM (same assigned → temporary
+// rule) with Account_Status__c = 'Active Customer' (formula: Stripe status
+// active/past_due and not canceled). It's a snapshot of TODAY's book — SF
+// keeps no assignment history — so a past window is measured against the
+// current book. The QBR side is limited to the same active book so the ratio
+// can't exceed 100%, and counts distinct accounts (two QBRs with one account
+// still cover one account).
+const ACTIVE_BOOK = (path: string) => `${path}Account_Status__c = 'Active Customer' AND ${path}Test_Account__c = false`;
+
+const BOOK_SIZE_SOQL = `
+  SELECT ${CSM_SELECT("")}, COUNT(Id) accounts
+  FROM Account
+  WHERE ${ACTIVE_BOOK("")}
+  GROUP BY ${CSM_GROUP("")}
+`;
+
 const QBR_COVERAGE_SOQL = (windowStart: string, windowEnd: string) => `
-  SELECT ${CSM_SELECT("Account__r.")}, COUNT(Id) qbrs_completed
+  SELECT ${CSM_SELECT("Account__r.")}, COUNT_DISTINCT(Account__c) covered
   FROM CX_Event__c
   WHERE Event_Category__c = 'Account Review'
     AND Completed_At__c >= ${dt(windowStart)} AND Completed_At__c < ${dt(windowEnd)}
+    AND ${ACTIVE_BOOK("Account__r.")}
   GROUP BY ${CSM_GROUP("Account__r.")}
 `;
+
+// Coverage per CSM from book sizes and covered-account counts. CSMs with no
+// active book are dropped (nothing to cover).
+export function qbrCoverageRows(
+  book: Map<string, { name: string; accounts: number }>,
+  covered: Map<string, { name: string; covered: number }>,
+  target: number
+): CsmMetric[] {
+  return [...book].flatMap(([id, { name, accounts }]) => {
+    if (accounts === 0) return [];
+    const n = covered.get(id)?.covered ?? 0;
+    const pct = Math.round((n / accounts) * 100);
+    return [{ csm: name, value: pct, target, detail: `${n} of ${accounts} accounts`, parts: { num: n, den: accounts }, status: statusFor(pct, target) }];
+  });
+}
 
 // 4. NPS — NPS_Score__c is a child of Contact (Master-Detail Contact__c), so
 // join Contact -> Account to reach the CSM. NPS_Score__c.User__c is the
@@ -209,11 +246,11 @@ export const MEANINGFUL_CONNECTIONS_GAP = {
 // Comp-plan targets aren't in Salesforce. These defaults are PLACEHOLDERS until
 // the real per-CSM values are finalized with Samuel; override them without a
 // rebuild by setting BONUS_TARGETS to JSON, e.g.
-//   {"logoChurn":2,"netConversions":10,"qbrCoverage":8,"nps":50,"saveRate":60,"csat":4.5}
+//   {"logoChurn":2,"netConversions":10,"qbrCoverage":80,"nps":50,"saveRate":60,"csat":4.5}
 const DEFAULT_TARGETS = {
   logoChurn: 2,
   netConversions: 10,
-  qbrCoverage: 8,
+  qbrCoverage: 80,
   nps: 50,
   saveRate: 60,
   csat: 4.5,
@@ -245,10 +282,24 @@ function mockMetrics(windowStart: string, windowEnd: string): BonusMetrics {
   return {
     logoChurn: { rows: churn.rows.map((m) => ({ ...m, status: statusForLowerIsBetter(m.value, m.target!) })) },
     netConversions: mk(10, 0.12),
-    qbrCoverage: mk(8, 0.1),
+    qbrCoverage: {
+      rows: csms.map((csm, i) => {
+        const accounts = 40 + i * 6;
+        const n = Math.round(accounts * (0.55 + 0.12 * i));
+        const value = Math.round((n / accounts) * 100);
+        return { csm, value, target: 80, detail: `${n} of ${accounts} accounts`, parts: { num: n, den: accounts }, status: statusFor(value, 80) };
+      }),
+    },
     nps: mk(50, 0.05),
     meaningfulConnections: MEANINGFUL_CONNECTIONS_GAP,
-    saveRate: mk(60, 0.08),
+    saveRate: {
+      rows: csms.map((csm, i) => {
+        const total = 10 + i * 3;
+        const saved = Math.round(total * (0.45 + 0.08 * i));
+        const value = Math.round((saved / total) * 100);
+        return { csm, value, target: 60, detail: `${saved} of ${total} saved`, parts: { num: saved, den: total }, status: statusFor(value, 60) };
+      }),
+    },
     csat: mk(4.5, 0.03),
     windowStart,
     windowEnd,
@@ -310,13 +361,11 @@ export async function getBonusMetrics(windowStart: string, windowEnd: string): P
   });
 
   const qbrCoverage = section(async () => {
-    const byCsm = rollupByCsm(await rows<"qbrs_completed">(QBR_COVERAGE_SOQL(windowStart, windowEnd)), ["qbrs_completed"]);
-    return [...byCsm.values()].map(({ name, qbrs_completed }) => ({
-      csm: name,
-      value: qbrs_completed,
-      target: t.qbrCoverage,
-      status: statusFor(qbrs_completed, t.qbrCoverage),
-    }));
+    const [book, covered] = await Promise.all([
+      rows<"accounts">(BOOK_SIZE_SOQL),
+      rows<"covered">(QBR_COVERAGE_SOQL(windowStart, windowEnd)),
+    ]);
+    return qbrCoverageRows(rollupByCsm(book, ["accounts"]), rollupByCsm(covered, ["covered"]), t.qbrCoverage);
   });
 
   const nps = section(async () => {
@@ -346,7 +395,14 @@ export async function getBonusMetrics(windowStart: string, windowEnd: string): P
     }
     return [...byAgent].map(([csm, { saved, total }]) => {
       const pct = total === 0 ? 0 : Math.round((saved / total) * 100);
-      return { csm, value: pct, target: t.saveRate, status: statusFor(pct, t.saveRate) };
+      return {
+        csm,
+        value: pct,
+        target: t.saveRate,
+        detail: `${saved} of ${total} saved`,
+        parts: { num: saved, den: total },
+        status: statusFor(pct, t.saveRate),
+      };
     });
   });
 
