@@ -43,6 +43,18 @@ Instead, set up a **separate, read-only** integration:
    USE_MOCK_DATA=false
    ```
 
+Optional env vars:
+
+| Var | Default | Purpose |
+|---|---|---|
+| `BONUS_TARGETS` | `{"logoChurn":2,"netConversions":10,"qbrCoverage":8,"nps":50,"saveRate":60,"csat":4.5}` | Comp-plan targets (placeholders — they are not in Salesforce). Any subset of keys overrides the defaults. |
+| `CSAT_SURVEY_ID` | `CX-CSAT` | `CX_Event__c.Survey_Id__c` value that identifies the CSAT survey. |
+
+The page and `/api/metrics` default to quarter-to-date and accept `?quarter=-1` (previous
+quarter) or `?from=YYYY-MM-DD&to=YYYY-MM-DD` (`to` is exclusive). Each metric loads
+independently: a query that fails (e.g. the run-as user can't read an object) shows its error in
+that section instead of failing the whole page.
+
 `lib/salesforce.ts` handles the token exchange and SOQL queries; `lib/metrics.ts` has one query
 per metric.
 
@@ -58,11 +70,11 @@ connected, pull its platform guide and fill in the actual deploy step (see the T
 |---|---|---|
 | Logo churn per CSM | `Account.Vitally_Assigned_CSM__c` grouped, filtered on `Account.Stripe_Subscription_Canceled_At__c` in-window | **Confirmed** — "locked as of Oct 1" = `Stripe_Subscription_Canceled_At__c` populated (confirmed 2026-09-28) |
 | Net monthly ↔ annual conversions | `MRR_Change__c.Starting_Price_Interval__c` / `Ending_Price_Interval__c` (`month`/`year`) | **Confirmed** — object purpose-built for this |
-| QBR coverage | `CX_Event__c` where `Event_Category__c = 'Account Review'` ("Business Review with DoorLoop", confirmed 2026-09-28) | **Confirmed** |
-| NPS | `NPS_Score__c.Score__c` (child of Contact via Master-Detail `Contact__c`; NPS = %promoters 9–10 − %detractors 0–6, not an average; filtered on `Date__c` = send date; onboarding NPS on `Onboarding__c.Onboarding_NPS_Score__c` excluded), joined `Contact__r.Account.Vitally_Assigned_CSM__c` (Contact→Account is the standard `AccountId` lookup) (⚠️ `NPS_Score__c.User__c` is the outreach caller, not the CSM — never group by it) | **Confirmed source; pipeline mid-migration** — GTM-2512 (Intercom→Salesforce automation) is still open, so coverage is partial/manual until it ships |
+| QBR coverage | `CX_Event__c` where `Event_Category__c = 'Account Review'` ("Business Review with DoorLoop", confirmed 2026-09-28) | **Confirmed field, no data** — as of 2026-10-01 no `CX_Event__c` has ever been logged as `Account Review`; CS calls are logged as `Customer Success`. The tile reads empty until QBRs are logged under that category. |
+| NPS | `NPS_Score__c.Score__c` (child of Contact via Master-Detail `Contact__c`; NPS = %promoters 9–10 − %detractors 0–6, not an average; filtered on `Date__c` = send date; onboarding NPS on `Onboarding__c.Onboarding_NPS_Score__c` excluded), joined `Contact__r.Account.Vitally_Assigned_CSM__c` (Contact→Account is the standard `AccountId` lookup) (⚠️ `NPS_Score__c.User__c` is the outreach caller, not the CSM — never group by it; `Score__c` is `Number(2,0)` and SOQL can't `GROUP BY` a number field, so the code runs three grouped counts: all / ≥9 / ≤6) | **Confirmed source; pipeline mid-migration** — GTM-2512 (Intercom→Salesforce automation) is still open, so coverage is partial/manual until it ships |
 | Meaningful connections / Zoom minutes | Candidates: `CX_Event__c.Meeting_Actual_Duration__c` or `ZVC__Zoom_Call_Log__c.Call_Duration_Minutes__c` (the latter is Zoom **Phone**, likely the wrong object) | **Gap — unresolved.** [GTM-2515](https://linear.app/doorloop/issue/GTM-2515) is open specifically to define this metric and its source. Do not ship either candidate as the real metric until that closes. |
 | Save rate | `DoorLoop_Cancelation_Request__c.Status__c = 'Saved'` over all rows with `Assigned_To__c` populated in-window | **Confirmed** — matches the existing `Open_Saves_by_Owner` / `Cancel Requests This Month by Outcome` reports in the salesforce repo |
-| CSAT | `CX_Event__c.Survey_Rating__c` (1–5 scale) **filtered by `Survey_Id__c`** — never aggregate this field across survey types | **Confirmed** |
+| CSAT | `CX_Event__c.Survey_Rating__c` (1–5 scale) **filtered by `Survey_Id__c = 'CX-CSAT'`** — never aggregate this field across survey types | **Confirmed, sparse** — one response in prod as of 2026-10-01 |
 
 **CSM attribution rule** (confirmed 2026-09-28): every per-CSM metric goes to the account's
 current `Vitally_Assigned_CSM__c`; if empty, to `Vitally_Temporary_CSM__c`. Churn counts for the
