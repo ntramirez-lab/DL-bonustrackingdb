@@ -1,4 +1,5 @@
-import { getBonusMetrics, type CsmMetric } from "@/lib/metrics";
+import { getBonusMetrics, type CsmMetric, type MetricSection } from "@/lib/metrics";
+import { resolveWindow } from "@/lib/window";
 
 function Tile({ metric, unit = "", decimals = 0 }: { metric: CsmMetric; unit?: string; decimals?: number }) {
   const label = { good: "On track", warning: "Watch", serious: "Behind", critical: "At risk" }[metric.status];
@@ -25,36 +26,51 @@ function Tile({ metric, unit = "", decimals = 0 }: { metric: CsmMetric; unit?: s
 
 function TileSection({
   title,
-  metrics,
+  section,
   unit,
   decimals,
+  emptyNote = "No records in this window.",
 }: {
   title: string;
-  metrics: CsmMetric[];
+  section: MetricSection;
   unit?: string;
   decimals?: number;
+  emptyNote?: string;
 }) {
   return (
     <section className="section">
       <h2>{title}</h2>
-      <div className="tile-grid">
-        {metrics.map((m) => (
-          <Tile key={m.csm} metric={m} unit={unit} decimals={decimals} />
-        ))}
-      </div>
+      {section.error ? (
+        <div className="gap-card">
+          <strong>Couldn&apos;t load this metric.</strong> {section.error}
+        </div>
+      ) : section.rows.length === 0 ? (
+        <div className="gap-card">{emptyNote}</div>
+      ) : (
+        <div className="tile-grid">
+          {section.rows.map((m) => (
+            <Tile key={m.csm} metric={m} unit={unit} decimals={decimals} />
+          ))}
+        </div>
+      )}
     </section>
   );
 }
 
 export const dynamic = "force-dynamic";
 
-export default async function DashboardPage() {
-  const now = new Date();
-  const quarterStart = new Date(now.getFullYear(), Math.floor(now.getMonth() / 3) * 3, 1);
-  const metrics = await getBonusMetrics(
-    quarterStart.toISOString().slice(0, 10),
-    now.toISOString().slice(0, 10)
-  );
+type SearchParams = Promise<Record<string, string | string[] | undefined>>;
+const one = (v: string | string[] | undefined) => (Array.isArray(v) ? v[0] : v);
+
+export default async function DashboardPage({ searchParams }: { searchParams: SearchParams }) {
+  const params = await searchParams;
+  const quarter = Number.parseInt(one(params.quarter) ?? "0", 10) || 0;
+  const { windowStart, windowEnd } = resolveWindow({
+    from: one(params.from),
+    to: one(params.to),
+    quarter: String(quarter),
+  });
+  const metrics = await getBonusMetrics(windowStart, windowEnd);
 
   return (
     <main className="page">
@@ -62,16 +78,36 @@ export default async function DashboardPage() {
         <h1>CSM Bonus Tracking</h1>
         <p>
           Data source: {metrics.source === "mock" ? "mock (Salesforce not configured — see .env.example)" : "Salesforce"}
+          {" · "}
+          {metrics.windowStart} to {metrics.windowEnd} (end exclusive)
           {" · "}generated {new Date(metrics.generatedAt).toLocaleString()}
+        </p>
+        <p>
+          <a href={`?quarter=${quarter - 1}`}>← Previous quarter</a>
+          {quarter < 0 && (
+            <>
+              {" · "}
+              <a href={`?quarter=${quarter + 1}`}>Next quarter →</a>
+            </>
+          )}
         </p>
       </div>
 
-      <TileSection title="Logo churn (lower is better)" metrics={metrics.logoChurn} />
-      <TileSection title="Net monthly → annual conversions" metrics={metrics.netConversions} />
-      <TileSection title="QBR coverage" metrics={metrics.qbrCoverage} />
-      <TileSection title="NPS" metrics={metrics.nps} />
-      <TileSection title="Save rate" metrics={metrics.saveRate} unit="%" />
-      <TileSection title="CSAT" metrics={metrics.csat} decimals={1} />
+      <TileSection title="Logo churn (lower is better)" section={metrics.logoChurn} />
+      <TileSection title="Net monthly → annual conversions" section={metrics.netConversions} />
+      <TileSection
+        title="QBR coverage"
+        section={metrics.qbrCoverage}
+        emptyNote="No CX Events with category “Account Review” completed in this window. QBRs only count when logged under that category."
+      />
+      <TileSection title="NPS" section={metrics.nps} />
+      <TileSection title="Save rate" section={metrics.saveRate} unit="%" />
+      <TileSection
+        title="CSAT"
+        section={metrics.csat}
+        decimals={1}
+        emptyNote="No CSAT responses (survey CX-CSAT) in this window."
+      />
 
       <section className="section">
         <h2>Meaningful connections / Zoom minutes</h2>

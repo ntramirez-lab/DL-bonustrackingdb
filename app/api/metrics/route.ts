@@ -1,12 +1,16 @@
 import { NextResponse } from "next/server";
 import { getBonusMetrics } from "@/lib/metrics";
+import { resolveWindow } from "@/lib/window";
+
+export const dynamic = "force-dynamic";
 
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
-  const now = new Date();
-  const quarterStart = new Date(now.getFullYear(), Math.floor(now.getMonth() / 3) * 3, 1);
-  const windowStart = searchParams.get("from") ?? quarterStart.toISOString().slice(0, 10);
-  const windowEnd = searchParams.get("to") ?? now.toISOString().slice(0, 10);
+  const { windowStart, windowEnd } = resolveWindow({
+    from: searchParams.get("from"),
+    to: searchParams.get("to"),
+    quarter: searchParams.get("quarter"),
+  });
 
   try {
     const metrics = await getBonusMetrics(windowStart, windowEnd);

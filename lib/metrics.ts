@@ -11,14 +11,23 @@ export interface CsmMetric {
   status: "good" | "warning" | "serious" | "critical";
 }
 
+// One dashboard section. A failed query fills `error` instead of failing the
+// whole page, so one missing permission doesn't blank every other metric.
+export interface MetricSection {
+  rows: CsmMetric[];
+  error?: string;
+}
+
 export interface BonusMetrics {
-  logoChurn: CsmMetric[];
-  netConversions: CsmMetric[];
-  qbrCoverage: CsmMetric[];
-  nps: CsmMetric[];
+  logoChurn: MetricSection;
+  netConversions: MetricSection;
+  qbrCoverage: MetricSection;
+  nps: MetricSection;
   meaningfulConnections: { note: string; candidates: string[] };
-  saveRate: CsmMetric[];
-  csat: CsmMetric[];
+  saveRate: MetricSection;
+  csat: MetricSection;
+  windowStart: string;
+  windowEnd: string;
   generatedAt: string;
   source: "salesforce" | "mock";
 }
@@ -135,27 +144,22 @@ const QBR_COVERAGE_SOQL = (windowStart: string, windowEnd: string) => `
 // join Contact -> Account to reach the CSM. NPS_Score__c.User__c is the
 // follow-up caller ("Who called?"), not the CSM — never group by it.
 // NPS is %promoters (9-10) minus %detractors (0-6), not an average of
-// Score__c, so group by the raw score (0-10) and bucket with npsFromScores().
+// Score__c. Score__c is Number(2,0) and SOQL can't GROUP BY a number field,
+// so run the same grouped COUNT three times (all / promoters / detractors)
+// and combine with npsFromCounts().
 // Date__c is the date the survey was SENT. Onboarding NPS lives separately on
 // Onboarding__c.Onboarding_NPS_Score__c and is not included here.
 // Note: population is still partly manual pending GTM-2512 (Intercom -> SF
 // automation); treat coverage as incomplete until that ships.
-const NPS_SOQL = (windowStart: string, windowEnd: string) => `
-  SELECT ${CSM_SELECT("Contact__r.Account.")},
-         Score__c score, COUNT(Id) responses
+const NPS_SOQL = (windowStart: string, windowEnd: string, scoreFilter: string) => `
+  SELECT ${CSM_SELECT("Contact__r.Account.")}, COUNT(Id) responses
   FROM NPS_Score__c
   WHERE Date__c >= ${windowStart} AND Date__c < ${windowEnd}
-    AND Score__c != null
-  GROUP BY ${CSM_GROUP("Contact__r.Account.")}, Score__c
+    AND ${scoreFilter}
+  GROUP BY ${CSM_GROUP("Contact__r.Account.")}
 `;
 
-export function npsFromScores(rows: { score: number; responses: number }[]): number | null {
-  let promoters = 0, detractors = 0, total = 0;
-  for (const { score, responses } of rows) {
-    total += responses;
-    if (score >= 9) promoters += responses;
-    else if (score <= 6) detractors += responses;
-  }
+export function npsFromCounts(total: number, promoters: number, detractors: number): number | null {
   return total === 0 ? null : Math.round(((promoters - detractors) / total) * 100);
 }
 
@@ -172,10 +176,10 @@ const SAVE_RATE_SOQL = (windowStart: string, windowEnd: string) => `
 
 // 6. CSAT — CX_Event__c.Survey_Rating__c (1-5 scale), MUST filter by
 // Survey_Id__c so the average never mixes rating scales from other survey
-// types stamped on the same field. Exported (not yet called from
-// getBonusMetrics below) because the CSAT survey's Survey_Id__c value isn't
-// pinned down yet — wire this in once that's confirmed.
-export const CSAT_SOQL = (surveyId: string, windowStart: string, windowEnd: string) => `
+// types stamped on the same field. The CSAT survey id is "CX-CSAT" (the only
+// Survey_Id__c in prod as of 2026-10-01, with a single response); override
+// with CSAT_SURVEY_ID if the survey is re-keyed.
+const CSAT_SOQL = (surveyId: string, windowStart: string, windowEnd: string) => `
   SELECT ${CSM_SELECT("Account__r.")}, SUM(Survey_Rating__c) rating_total, COUNT(Survey_Rating__c) responses
   FROM CX_Event__c
   WHERE Survey_Id__c = '${surveyId}'
@@ -201,50 +205,174 @@ export const MEANINGFUL_CONNECTIONS_GAP = {
   ],
 };
 
+// --- Targets --------------------------------------------------------------
+// Comp-plan targets aren't in Salesforce. These defaults are PLACEHOLDERS until
+// the real per-CSM values are finalized with Samuel; override them without a
+// rebuild by setting BONUS_TARGETS to JSON, e.g.
+//   {"logoChurn":2,"netConversions":10,"qbrCoverage":8,"nps":50,"saveRate":60,"csat":4.5}
+const DEFAULT_TARGETS = {
+  logoChurn: 2,
+  netConversions: 10,
+  qbrCoverage: 8,
+  nps: 50,
+  saveRate: 60,
+  csat: 4.5,
+};
+type Targets = typeof DEFAULT_TARGETS;
+
+function targets(): Targets {
+  const raw = process.env.BONUS_TARGETS;
+  if (!raw) return DEFAULT_TARGETS;
+  try {
+    return { ...DEFAULT_TARGETS, ...(JSON.parse(raw) as Partial<Targets>) };
+  } catch {
+    return DEFAULT_TARGETS;
+  }
+}
+
 // --- Mock data (default until the read-only integration user exists) ----
 
-function mockMetrics(): BonusMetrics {
+function mockMetrics(windowStart: string, windowEnd: string): BonusMetrics {
   const csms = ["A. Ramirez", "J. Ortiz", "S. Huang", "M. Castillo"];
-  const mk = (target: number, spread: number): CsmMetric[] =>
-    csms.map((csm, i) => {
+  const mk = (target: number, spread: number): MetricSection => ({
+    rows: csms.map((csm, i) => {
       const value = Math.round(target * (0.7 + spread * i));
       return { csm, value, target, status: statusFor(value, target) };
-    });
+    }),
+  });
 
+  const churn = mk(2, 0.15);
   return {
-    logoChurn: mk(2, 0.15).map((m) => ({ ...m, status: statusForLowerIsBetter(m.value, m.target!) })),
+    logoChurn: { rows: churn.rows.map((m) => ({ ...m, status: statusForLowerIsBetter(m.value, m.target!) })) },
     netConversions: mk(10, 0.12),
     qbrCoverage: mk(8, 0.1),
     nps: mk(50, 0.05),
     meaningfulConnections: MEANINGFUL_CONNECTIONS_GAP,
     saveRate: mk(60, 0.08),
     csat: mk(4.5, 0.03),
+    windowStart,
+    windowEnd,
     generatedAt: new Date().toISOString(),
     source: "mock",
   };
 }
 
+// --- Live fetch -------------------------------------------------------------
+
+type Row<K extends string> = CsmAttributedRow & Record<K, number | null>;
+
+// "Unassigned" sorts last; everyone else alphabetically.
+function sortRows(rows: CsmMetric[]): CsmMetric[] {
+  return rows.sort((a, b) =>
+    a.csm === "Unassigned" ? 1 : b.csm === "Unassigned" ? -1 : a.csm.localeCompare(b.csm)
+  );
+}
+
+async function section(build: () => Promise<CsmMetric[]>): Promise<MetricSection> {
+  try {
+    return { rows: sortRows(await build()) };
+  } catch (err) {
+    return { rows: [], error: err instanceof Error ? err.message : String(err) };
+  }
+}
+
+async function rows<K extends string>(soql: string): Promise<Row<K>[]> {
+  return (await soqlQuery<Row<K>>(soql)).records;
+}
+
 export async function getBonusMetrics(windowStart: string, windowEnd: string): Promise<BonusMetrics> {
-  if (usingMockData()) return mockMetrics();
+  if (usingMockData()) return mockMetrics(windowStart, windowEnd);
+  const t = targets();
 
-  // Real fetch — left intentionally simple (parallel raw queries, light
-  // shaping) until the actual dashboard requirements (targets per CSM,
-  // pooled vs. dedicated split) are finalized with Samuel.
-  const [churn, conversions, qbr, nps, saves] = await Promise.all([
-    soqlQuery(LOGO_CHURN_SOQL(windowStart, windowEnd)),
-    soqlQuery(NET_CONVERSIONS_SOQL(windowStart, windowEnd)),
-    soqlQuery(QBR_COVERAGE_SOQL(windowStart, windowEnd)),
-    soqlQuery(NPS_SOQL(windowStart, windowEnd)),
-    soqlQuery(SAVE_RATE_SOQL(windowStart, windowEnd)),
-  ]);
+  const logoChurn = section(async () => {
+    const byCsm = rollupByCsm(await rows<"churned">(LOGO_CHURN_SOQL(windowStart, windowEnd)), ["churned"]);
+    return [...byCsm.values()].map(({ name, churned }) => ({
+      csm: name,
+      value: churned,
+      target: t.logoChurn,
+      status: statusForLowerIsBetter(churned, t.logoChurn),
+    }));
+  });
 
-  // TODO: shape these into CsmMetric[] via rollupByCsm() once per-CSM
-  // targets are defined (comp plan values aren't in Salesforce).
-  void churn;
-  void conversions;
-  void qbr;
-  void nps;
-  void saves;
+  // Net = monthly->annual minus annual->monthly, per attributed CSM.
+  const netConversions = section(async () => {
+    const signed = (await rows<"changes">(NET_CONVERSIONS_SOQL(windowStart, windowEnd))).map((r) => {
+      const toAnnual = (r as Record<string, unknown>).Ending_Price_Interval__c === "year";
+      return { ...r, net: (toAnnual ? 1 : -1) * (r.changes ?? 0) };
+    });
+    const byCsm = rollupByCsm(signed, ["net"]);
+    return [...byCsm.values()].map(({ name, net }) => ({
+      csm: name,
+      value: net,
+      target: t.netConversions,
+      status: statusFor(net, t.netConversions),
+    }));
+  });
 
-  return { ...mockMetrics(), source: "salesforce" };
+  const qbrCoverage = section(async () => {
+    const byCsm = rollupByCsm(await rows<"qbrs_completed">(QBR_COVERAGE_SOQL(windowStart, windowEnd)), ["qbrs_completed"]);
+    return [...byCsm.values()].map(({ name, qbrs_completed }) => ({
+      csm: name,
+      value: qbrs_completed,
+      target: t.qbrCoverage,
+      status: statusFor(qbrs_completed, t.qbrCoverage),
+    }));
+  });
+
+  const nps = section(async () => {
+    const [all, promoters, detractors] = await Promise.all([
+      rows<"responses">(NPS_SOQL(windowStart, windowEnd, "Score__c != null")),
+      rows<"responses">(NPS_SOQL(windowStart, windowEnd, "Score__c >= 9")),
+      rows<"responses">(NPS_SOQL(windowStart, windowEnd, "Score__c <= 6")),
+    ]);
+    const tag = (rs: Row<"responses">[], k: "total" | "pro" | "det") => rs.map((r) => ({ ...r, total: 0, pro: 0, det: 0, [k]: r.responses ?? 0 }));
+    const byCsm = rollupByCsm([...tag(all, "total"), ...tag(promoters, "pro"), ...tag(detractors, "det")], ["total", "pro", "det"]);
+    return [...byCsm.values()].flatMap(({ name, total, pro, det }) => {
+      const score = npsFromCounts(total, pro, det);
+      return score === null ? [] : [{ csm: name, value: score, target: t.nps, status: statusFor(score, t.nps) }];
+    });
+  });
+
+  // Save rate = Saved / all assigned requests, per Assigned_To__c (not the CSM rule).
+  const saveRate = section(async () => {
+    const byAgent = new Map<string, { saved: number; total: number }>();
+    for (const r of (await soqlQuery<Record<string, unknown>>(SAVE_RATE_SOQL(windowStart, windowEnd))).records) {
+      const agent = String(r.agent ?? "Unassigned");
+      const acc = byAgent.get(agent) ?? { saved: 0, total: 0 };
+      const n = Number(r.requests ?? 0);
+      acc.total += n;
+      if (r.Status__c === "Saved") acc.saved += n;
+      byAgent.set(agent, acc);
+    }
+    return [...byAgent].map(([csm, { saved, total }]) => {
+      const pct = total === 0 ? 0 : Math.round((saved / total) * 100);
+      return { csm, value: pct, target: t.saveRate, status: statusFor(pct, t.saveRate) };
+    });
+  });
+
+  // CSAT average is rebuilt from summed totals / counts, never averaged averages.
+  const csat = section(async () => {
+    const surveyId = process.env.CSAT_SURVEY_ID ?? "CX-CSAT";
+    const byCsm = rollupByCsm(await rows<"rating_total" | "responses">(CSAT_SOQL(surveyId, windowStart, windowEnd)), ["rating_total", "responses"]);
+    return [...byCsm.values()]
+      .filter(({ responses }) => responses > 0)
+      .map(({ name, rating_total, responses }) => {
+        const avg = Math.round((rating_total / responses) * 10) / 10;
+        return { csm: name, value: avg, target: t.csat, status: statusFor(avg, t.csat) };
+      });
+  });
+
+  return {
+    logoChurn: await logoChurn,
+    netConversions: await netConversions,
+    qbrCoverage: await qbrCoverage,
+    nps: await nps,
+    meaningfulConnections: MEANINGFUL_CONNECTIONS_GAP,
+    saveRate: await saveRate,
+    csat: await csat,
+    windowStart,
+    windowEnd,
+    generatedAt: new Date().toISOString(),
+    source: "salesforce",
+  };
 }
