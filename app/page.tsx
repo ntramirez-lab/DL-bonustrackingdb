@@ -199,7 +199,7 @@ function pooled(s: MetricSection, noun: string): { value: string; sub: string } 
   return { value: `${Math.round((num / den) * 100)}%`, sub: `${num.toLocaleString()} of ${den.toLocaleString()} ${noun}` };
 }
 
-function teamSummary(m: Record<"logoChurn" | "netConversions" | "qbrCoverage" | "saveRate", MetricSection>): Summary[] {
+function teamSummary(m: BonusMetrics): Summary[] {
   const net = sum(m.netConversions);
   return [
     {
@@ -207,7 +207,9 @@ function teamSummary(m: Record<"logoChurn" | "netConversions" | "qbrCoverage" | 
       value: unavailable(m.logoChurn) ? "—" : sum(m.logoChurn).toLocaleString(),
       sub: unavailable(m.logoChurn)
         ? "accounts canceled (lower is better)"
-        : `accounts canceled · ${usd(m.logoChurn.rows.reduce((acc, r) => acc + (r.arr ?? 0), 0))} ARR lost`,
+        : m.churnArrField
+          ? `accounts canceled · ${usd(m.logoChurn.rows.reduce((acc, r) => acc + (r.arr ?? 0), 0))} ARR lost`
+          : "accounts canceled · ARR unavailable",
       tone: "navy",
     },
     {
@@ -374,7 +376,7 @@ export default async function DashboardPage({ searchParams }: { searchParams: Se
 
   const team = (t: Team): BonusMetrics => ({
     ...metrics,
-    logoChurn: forTeam(metrics.logoChurn, t, { target: metrics.targets.logoChurn, lowerIsBetter: true, arr: true }),
+    logoChurn: forTeam(metrics.logoChurn, t, { target: metrics.targets.logoChurn, lowerIsBetter: true, arr: !!metrics.churnArrField }),
     netConversions: forTeam(metrics.netConversions, t, { target: metrics.targets.netConversions }),
     qbrCoverage: forTeam(metrics.qbrCoverage, t),
     nps: forTeam(metrics.nps, t),
