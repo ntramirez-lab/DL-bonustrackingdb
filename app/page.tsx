@@ -81,7 +81,7 @@ function Info({ text }: { text: string }) {
 function forTeam(
   s: MetricSection,
   team: Team,
-  zeroFill?: { target: number; lowerIsBetter?: boolean; arr?: boolean }
+  zeroFill?: { target: number; lowerIsBetter?: boolean; arr?: boolean; breakdown?: boolean }
 ): MetricSection {
   const rows = s.rows.filter((r) => teamOf(r.csm) === team);
   if (zeroFill && !s.error) {
@@ -89,7 +89,7 @@ function forTeam(
     for (const csm of members(team)) {
       if (present.has(csm.toLowerCase())) continue;
       const status = zeroFill.lowerIsBetter ? statusForLowerIsBetter(0, zeroFill.target) : statusFor(0, zeroFill.target);
-      rows.push({ csm, value: 0, target: zeroFill.target, status, ...(zeroFill.arr ? { arr: 0 } : {}) });
+      rows.push({ csm, value: 0, target: zeroFill.target, status, ...(zeroFill.arr ? { arr: 0 } : {}), ...(zeroFill.breakdown ? { breakdown: { up: 0, down: 0 } } : {}) });
     }
     rows.sort((a, b) => a.csm.localeCompare(b.csm));
   }
@@ -167,6 +167,11 @@ function Scorecard({ team, m }: { team: Team; m: BonusMetrics }) {
                       </span>
                       {row.detail && <span className="cell-detail">{row.detail}</span>}
                       {row.arr !== undefined && <span className="cell-detail">{usd(row.arr)} ARR</span>}
+                      {row.breakdown && (
+                        <span className="cell-detail">
+                          ↑{row.breakdown.up} / ↓{row.breakdown.down}
+                        </span>
+                      )}
                     </td>
                   );
                 })}
@@ -215,7 +220,9 @@ function teamSummary(m: BonusMetrics): Summary[] {
     {
       label: "Net monthly → annual",
       value: unavailable(m.netConversions) ? "—" : `${net > 0 ? "+" : ""}${net.toLocaleString()}`,
-      sub: m.netConversions.error ? "couldn't load" : "upgrades minus downgrades",
+      sub: m.netConversions.error
+        ? "couldn't load"
+        : `↑${m.netConversions.rows.reduce((a, r) => a + (r.breakdown?.up ?? 0), 0)} to annual / ↓${m.netConversions.rows.reduce((a, r) => a + (r.breakdown?.down ?? 0), 0)} to monthly`,
       tone: "blue",
     },
     { label: "QBR coverage", ...pooled(m.qbrCoverage, "active accounts"), tone: "neon" },
@@ -245,6 +252,11 @@ function Tile({ metric, unit = "", decimals = 0 }: { metric: CsmMetric; unit?: s
       </span>
       {metric.detail && <span className="tile-meta">{metric.detail}</span>}
       {metric.arr !== undefined && <span className="tile-meta">{usd(metric.arr)} ARR lost</span>}
+      {metric.breakdown && (
+        <span className="tile-meta">
+          ↑{metric.breakdown.up} to annual / ↓{metric.breakdown.down} to monthly
+        </span>
+      )}
       {metric.target !== undefined && (
         <span className="tile-meta">
           target {metric.target.toFixed(decimals)}
@@ -316,7 +328,7 @@ function TeamBand({ team, label, m, tint }: { team: Team; label: string; m: Bonu
           />
           <Panel
             title="Net monthly → annual conversions"
-            info="Monthly → annual switches minus annual → monthly downgrades, from MRR Change records in the period."
+            info="Monthly → annual switches minus annual → monthly downgrades, from MRR Change records in the period. New and ended subscriptions don't count."
             section={m.netConversions}
           />
           <Panel
@@ -377,7 +389,7 @@ export default async function DashboardPage({ searchParams }: { searchParams: Se
   const team = (t: Team): BonusMetrics => ({
     ...metrics,
     logoChurn: forTeam(metrics.logoChurn, t, { target: metrics.targets.logoChurn, lowerIsBetter: true, arr: !!metrics.churnArrField }),
-    netConversions: forTeam(metrics.netConversions, t, { target: metrics.targets.netConversions }),
+    netConversions: forTeam(metrics.netConversions, t, { target: metrics.targets.netConversions, breakdown: true }),
     qbrCoverage: forTeam(metrics.qbrCoverage, t),
     nps: forTeam(metrics.nps, t),
     saveRate: forTeam(metrics.saveRate, t),
