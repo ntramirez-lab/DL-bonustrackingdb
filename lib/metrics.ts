@@ -39,6 +39,8 @@ export interface BonusMetrics {
   attribution: Attribution;
   targets: Targets;
   cleanup: CleanupRow[];
+  // Account field the churned-ARR figure came from; null if none was readable.
+  churnArrField: string | null;
   generatedAt: string;
   source: "salesforce" | "mock";
 }
@@ -164,19 +166,48 @@ export function rollupByCsm<K extends string>(
   return out;
 }
 
-// ARR lost = SUM(Combined_Stripe_Subscription_ARR_AC__c): total ARR (core +
-// AI) after coupons, as last synced from Stripe for the canceled account.
 // 1. Logo churn per CSM — accounts whose Stripe subscription was canceled in
 // the window, grouped by the CSM who owned them. "Locked as of Oct 1" =
 // Stripe_Subscription_Canceled_At__c populated (per Alfredo/Santi, 2026-09-28).
-const LOGO_CHURN_SOQL = (windowStart: string, windowEnd: string) => `
-  SELECT ${CSM_SELECT("")}, COUNT(Id) churned, SUM(Combined_Stripe_Subscription_ARR_AC__c) arr
-  FROM Account
+const CHURN_WHERE = (windowStart: string, windowEnd: string) => `
   WHERE Stripe_Subscription_Canceled_At__c >= ${dt(windowStart)}
     AND Stripe_Subscription_Canceled_At__c < ${dt(windowEnd)}
-    AND Test_Account__c = false
+    AND Test_Account__c = false`;
+
+const LOGO_CHURN_SOQL = (windowStart: string, windowEnd: string) => `
+  SELECT ${CSM_SELECT("")}, COUNT(Id) churned
+  FROM Account ${CHURN_WHERE(windowStart, windowEnd)}
   GROUP BY ${CSM_GROUP("")}
 `;
+
+// ARR lost to churn, as last synced from Stripe for the canceled accounts.
+// Separate query so a field the integration user can't read never takes the
+// account count down with it. Fields in order of preference: total ARR (core
+// + AI) after coupons, then core ARR after coupons, then core list ARR. The
+// integration user couldn't read the combined field as of 2026-10-02.
+const CHURN_ARR_FIELDS = [
+  "Combined_Stripe_Subscription_ARR_AC__c",
+  "Stripe_Subscription_ARR_After_Coupons__c",
+  "Stripe_Subscription_ARR__c",
+];
+const CHURN_ARR_SOQL = (field: string, windowStart: string, windowEnd: string) => `
+  SELECT ${CSM_SELECT("")}, SUM(${field}) arr
+  FROM Account ${CHURN_WHERE(windowStart, windowEnd)}
+  GROUP BY ${CSM_GROUP("")}
+`;
+
+// First ARR field the integration user can read, with its per-row sums; null
+// if none can be read (the tiles then say "ARR unavailable").
+async function churnArrRows(windowStart: string, windowEnd: string) {
+  for (const field of CHURN_ARR_FIELDS) {
+    try {
+      return { field, rows: await rows<"arr">(CHURN_ARR_SOQL(field, windowStart, windowEnd)) };
+    } catch (err) {
+      if (!String(err).includes("INVALID_FIELD")) throw err;
+    }
+  }
+  return null;
+}
 
 // 2. Net monthly<->annual conversions — MRR_Change__c rows where the billing
 // interval flipped between month and year.
@@ -370,6 +401,7 @@ function mockMetrics(windowStart: string, windowEnd: string, by: Attribution): B
     windowEnd,
     attribution: by,
     targets: t,
+    churnArrField: "Combined_Stripe_Subscription_ARR_AC__c",
     cleanup: [
       { name: "Miah Camacho", assigned: 12, temporary: 0 },
       { name: "Jeremy Keillor", assigned: 1, temporary: 0 },
@@ -411,12 +443,19 @@ export async function getBonusMetrics(
   if (usingMockData()) return mockMetrics(windowStart, windowEnd, by);
   const t = targets();
 
+  let churnArrField: string | null = null;
   const logoChurn = section(async () => {
-    const byCsm = rollupByCsm(await rows<"churned" | "arr">(LOGO_CHURN_SOQL(windowStart, windowEnd)), ["churned", "arr"], by);
-    return [...byCsm.values()].map(({ name, churned, arr }) => ({
+    const [counts, arr] = await Promise.all([
+      rows<"churned">(LOGO_CHURN_SOQL(windowStart, windowEnd)),
+      churnArrRows(windowStart, windowEnd).catch(() => null),
+    ]);
+    churnArrField = arr?.field ?? null;
+    const arrByCsm = arr ? rollupByCsm(arr.rows, ["arr"], by) : null;
+    const byCsm = rollupByCsm(counts, ["churned"], by);
+    return [...byCsm].map(([id, { name, churned }]) => ({
       csm: name,
       value: churned,
-      arr,
+      ...(arrByCsm ? { arr: arrByCsm.get(id)?.arr ?? 0 } : {}),
       target: t.logoChurn,
       status: statusForLowerIsBetter(churned, t.logoChurn),
     }));
@@ -510,6 +549,7 @@ export async function getBonusMetrics(
     attribution: by,
     targets: t,
     cleanup: await cleanup,
+    churnArrField,
     generatedAt: new Date().toISOString(),
     source: "salesforce",
   };
