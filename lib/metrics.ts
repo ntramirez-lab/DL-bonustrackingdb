@@ -14,6 +14,8 @@ export interface CsmMetric {
   // Raw numerator/denominator behind a ratio metric, so team totals can be
   // pooled (sum of parts) instead of averaging per-CSM percentages.
   parts?: { num: number; den: number };
+  // Upgrades / downgrades behind a net figure (monthly <-> annual).
+  breakdown?: { up: number; down: number };
   // Dollar amount behind the metric, e.g. ARR lost to churn.
   arr?: number;
   status: "good" | "warning" | "serious" | "critical";
@@ -67,9 +69,39 @@ export function statusForLowerIsBetter(value: number, target: number): CsmMetric
 // --- Confirmed queries (GTM-2496) ---------------------------------------
 
 // SOQL rejects a bare date literal against a DateTime field, so DateTime
-// filters (CreatedDate, *_At__c) need a full UTC timestamp. Date fields
-// (NPS_Score__c.Date__c, Requested_On__c) take the YYYY-MM-DD form as-is.
-const dt = (date: string) => `${date}T00:00:00Z`;
+// filters (CreatedDate, *_At__c) need a full timestamp. Periods start at
+// midnight US Eastern (DoorLoop's reporting timezone), so the dashboard
+// matches Salesforce reports, which show dates in Eastern. The offset is
+// worked out per date so DST is handled (-04:00 summer, -05:00 winter).
+// Date fields (NPS_Score__c.Date__c, Requested_On__c) take YYYY-MM-DD as-is.
+const REPORTING_TZ = "America/New_York";
+
+function easternOffset(date: string): string {
+  // 05:00 UTC is local midnight under EST and 01:00 under EDT — both before
+  // the 02:00 switch, so DST-change days get the offset in force at midnight.
+  const probe = new Date(`${date}T05:00:00Z`);
+  const name = new Intl.DateTimeFormat("en-US", { timeZone: REPORTING_TZ, timeZoneName: "longOffset" })
+    .formatToParts(probe)
+    .find((p) => p.type === "timeZoneName")?.value; // e.g. "GMT-04:00"
+  const m = name?.match(/GMT([+-]\d{2}:\d{2})/);
+  return m?.[1] ?? usEasternFallback(date);
+}
+
+// US rule, in case the runtime lacks timezone data: EDT from the second
+// Sunday of March through the day before the first Sunday of November.
+function usEasternFallback(date: string): string {
+  const [y = 1970, mo = 1, d = 1] = date.split("-").map(Number);
+  const nthSunday = (month: number, n: number) => {
+    const first = new Date(Date.UTC(y, month, 1)).getUTCDay();
+    return 1 + ((7 - first) % 7) + (n - 1) * 7;
+  };
+  const day = Date.UTC(y, mo - 1, d);
+  const dstStart = Date.UTC(y, 2, nthSunday(2, 2));
+  const dstEnd = Date.UTC(y, 10, nthSunday(10, 1));
+  return day > dstStart && day <= dstEnd ? "-04:00" : "-05:00";
+}
+
+export const dt = (date: string) => `${date}T00:00:00${easternOffset(date)}`;
 
 // CSM attribution (Natalia, 2026-10-02). One rule per account, in two
 // flavours while assignments migrate:
@@ -377,7 +409,9 @@ function mockMetrics(windowStart: string, windowEnd: string, by: Attribution): B
     logoChurn: {
       rows: churn.rows.map((m) => ({ ...m, arr: m.value * 2_340, status: statusForLowerIsBetter(m.value, m.target!) })),
     },
-    netConversions: mk(10, 0.12),
+    netConversions: {
+      rows: mk(10, 0.12).rows.map((m) => ({ ...m, breakdown: { up: m.value + 3, down: 3 } })),
+    },
     qbrCoverage: {
       rows: csms.map((csm, i) => {
         const accounts = 40 + i * 6;
@@ -465,12 +499,14 @@ export async function getBonusMetrics(
   const netConversions = section(async () => {
     const signed = (await rows<"changes">(NET_CONVERSIONS_SOQL(windowStart, windowEnd))).map((r) => {
       const toAnnual = (r as Record<string, unknown>).Ending_Price_Interval__c === "year";
-      return { ...r, net: (toAnnual ? 1 : -1) * (r.changes ?? 0) };
+      const n = r.changes ?? 0;
+      return { ...r, net: toAnnual ? n : -n, up: toAnnual ? n : 0, down: toAnnual ? 0 : n };
     });
-    const byCsm = rollupByCsm(signed, ["net"], by);
-    return [...byCsm.values()].map(({ name, net }) => ({
+    const byCsm = rollupByCsm(signed, ["net", "up", "down"], by);
+    return [...byCsm.values()].map(({ name, net, up, down }) => ({
       csm: name,
       value: net,
+      breakdown: { up, down },
       target: t.netConversions,
       status: statusFor(net, t.netConversions),
     }));
