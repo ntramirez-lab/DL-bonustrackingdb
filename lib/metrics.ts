@@ -33,6 +33,7 @@ export interface BonusMetrics {
   csat: MetricSection;
   windowStart: string;
   windowEnd: string;
+  attribution: Attribution;
   generatedAt: string;
   source: "salesforce" | "mock";
 }
@@ -63,11 +64,17 @@ function statusForLowerIsBetter(value: number, target: number): CsmMetric["statu
 // (NPS_Score__c.Date__c, Requested_On__c) take the YYYY-MM-DD form as-is.
 const dt = (date: string) => `${date}T00:00:00Z`;
 
-// CSM attribution rule (confirmed with Natalia, 2026-09-28): a metric goes to
-// the account's CURRENT Vitally_Assigned_CSM__c; if that's empty it falls back
-// to Vitally_Temporary_CSM__c. Churn counts for the current CSM too — no
-// crediting Previous_CSM__c. SOQL can't COALESCE inside GROUP BY, so each
-// query groups by both lookups and attributedCsm() picks the owner per row.
+// CSM attribution (Natalia, 2026-10-02): the dashboard has two views, each
+// using ONE lookup with no fallback between them:
+//   - "assigned": Account.Vitally_Assigned_CSM__c — the permanent owner, where
+//     every assignment is headed.
+//   - "temporary": Account.Vitally_Temporary_CSM__c — today holds the dedicated
+//     CSMs' interim books; later it marks which pooled CSM is working an account.
+// Churn counts for the account's current CSM (Previous_CSM__c not used).
+// SOQL can't COALESCE inside GROUP BY, so each query groups by both lookups
+// and attributedCsm() picks the owner per row for the chosen view.
+export type Attribution = "assigned" | "temporary";
+
 const CSM_GROUP = (path: string) =>
   [
     `${path}Vitally_Assigned_CSM__c`,
@@ -86,10 +93,9 @@ interface CsmAttributedRow {
   tmpName?: string | null;
 }
 
-export function attributedCsm(row: CsmAttributedRow): { id: string; name: string } {
-  if (row.csmId) return { id: row.csmId, name: row.csmName ?? row.csmId };
-  if (row.tmpId) return { id: row.tmpId, name: row.tmpName ?? row.tmpId };
-  return { id: "unassigned", name: "Unassigned" };
+export function attributedCsm(row: CsmAttributedRow, by: Attribution): { id: string; name: string } {
+  const [id, name] = by === "assigned" ? [row.csmId, row.csmName] : [row.tmpId, row.tmpName];
+  return id ? { id, name: name ?? id } : { id: "unassigned", name: "Unassigned" };
 }
 
 // Collapses grouped-aggregate rows onto their attributed CSM, summing the
@@ -97,11 +103,12 @@ export function attributedCsm(row: CsmAttributedRow): { id: string; name: string
 // afterwards (never average the per-group averages).
 export function rollupByCsm<K extends string>(
   rows: (CsmAttributedRow & Record<K, number | null>)[],
-  fields: K[]
+  fields: K[],
+  by: Attribution
 ): Map<string, { name: string } & Record<K, number>> {
   const out = new Map<string, { name: string } & Record<K, number>>();
   for (const row of rows) {
-    const { id, name } = attributedCsm(row);
+    const { id, name } = attributedCsm(row, by);
     const acc = out.get(id) ?? ({ name, ...Object.fromEntries(fields.map((f) => [f, 0])) } as { name: string } & Record<K, number>);
     for (const f of fields) (acc as Record<K, number>)[f] += row[f] ?? 0;
     out.set(id, acc);
@@ -269,8 +276,13 @@ function targets(): Targets {
 
 // --- Mock data (default until the read-only integration user exists) ----
 
-function mockMetrics(windowStart: string, windowEnd: string): BonusMetrics {
-  const csms = ["A. Ramirez", "J. Ortiz", "S. Huang", "M. Castillo"];
+function mockMetrics(windowStart: string, windowEnd: string, by: Attribution): BonusMetrics {
+  // Real roster names so the dedicated/pooled split renders; the temporary
+  // view only has the dedicated team (that's who holds interim books today).
+  const csms =
+    by === "temporary"
+      ? ["Anna Grouzdev", "Austin Leyba", "Sahil Saini", "Tiffany Figueroa"]
+      : ["Anna Grouzdev", "Austin Leyba", "Guillermo Celta", "Jeremy Galvez", "Nestor Ramirez", "Unassigned"];
   const mk = (target: number, spread: number): MetricSection => ({
     rows: csms.map((csm, i) => {
       const value = Math.round(target * (0.7 + spread * i));
@@ -285,7 +297,7 @@ function mockMetrics(windowStart: string, windowEnd: string): BonusMetrics {
     qbrCoverage: {
       rows: csms.map((csm, i) => {
         const accounts = 40 + i * 6;
-        const n = Math.round(accounts * (0.55 + 0.12 * i));
+        const n = Math.round(accounts * Math.min(0.95, 0.55 + 0.08 * i));
         const value = Math.round((n / accounts) * 100);
         return { csm, value, target: 80, detail: `${n} of ${accounts} accounts`, parts: { num: n, den: accounts }, status: statusFor(value, 80) };
       }),
@@ -303,6 +315,7 @@ function mockMetrics(windowStart: string, windowEnd: string): BonusMetrics {
     csat: mk(4.5, 0.03),
     windowStart,
     windowEnd,
+    attribution: by,
     generatedAt: new Date().toISOString(),
     source: "mock",
   };
@@ -331,12 +344,16 @@ async function rows<K extends string>(soql: string): Promise<Row<K>[]> {
   return (await soqlQuery<Row<K>>(soql)).records;
 }
 
-export async function getBonusMetrics(windowStart: string, windowEnd: string): Promise<BonusMetrics> {
-  if (usingMockData()) return mockMetrics(windowStart, windowEnd);
+export async function getBonusMetrics(
+  windowStart: string,
+  windowEnd: string,
+  by: Attribution = "assigned"
+): Promise<BonusMetrics> {
+  if (usingMockData()) return mockMetrics(windowStart, windowEnd, by);
   const t = targets();
 
   const logoChurn = section(async () => {
-    const byCsm = rollupByCsm(await rows<"churned">(LOGO_CHURN_SOQL(windowStart, windowEnd)), ["churned"]);
+    const byCsm = rollupByCsm(await rows<"churned">(LOGO_CHURN_SOQL(windowStart, windowEnd)), ["churned"], by);
     return [...byCsm.values()].map(({ name, churned }) => ({
       csm: name,
       value: churned,
@@ -351,7 +368,7 @@ export async function getBonusMetrics(windowStart: string, windowEnd: string): P
       const toAnnual = (r as Record<string, unknown>).Ending_Price_Interval__c === "year";
       return { ...r, net: (toAnnual ? 1 : -1) * (r.changes ?? 0) };
     });
-    const byCsm = rollupByCsm(signed, ["net"]);
+    const byCsm = rollupByCsm(signed, ["net"], by);
     return [...byCsm.values()].map(({ name, net }) => ({
       csm: name,
       value: net,
@@ -365,7 +382,7 @@ export async function getBonusMetrics(windowStart: string, windowEnd: string): P
       rows<"accounts">(BOOK_SIZE_SOQL),
       rows<"covered">(QBR_COVERAGE_SOQL(windowStart, windowEnd)),
     ]);
-    return qbrCoverageRows(rollupByCsm(book, ["accounts"]), rollupByCsm(covered, ["covered"]), t.qbrCoverage);
+    return qbrCoverageRows(rollupByCsm(book, ["accounts"], by), rollupByCsm(covered, ["covered"], by), t.qbrCoverage);
   });
 
   const nps = section(async () => {
@@ -375,7 +392,7 @@ export async function getBonusMetrics(windowStart: string, windowEnd: string): P
       rows<"responses">(NPS_SOQL(windowStart, windowEnd, "Score__c <= 6")),
     ]);
     const tag = (rs: Row<"responses">[], k: "total" | "pro" | "det") => rs.map((r) => ({ ...r, total: 0, pro: 0, det: 0, [k]: r.responses ?? 0 }));
-    const byCsm = rollupByCsm([...tag(all, "total"), ...tag(promoters, "pro"), ...tag(detractors, "det")], ["total", "pro", "det"]);
+    const byCsm = rollupByCsm([...tag(all, "total"), ...tag(promoters, "pro"), ...tag(detractors, "det")], ["total", "pro", "det"], by);
     return [...byCsm.values()].flatMap(({ name, total, pro, det }) => {
       const score = npsFromCounts(total, pro, det);
       return score === null ? [] : [{ csm: name, value: score, target: t.nps, status: statusFor(score, t.nps) }];
@@ -409,7 +426,7 @@ export async function getBonusMetrics(windowStart: string, windowEnd: string): P
   // CSAT average is rebuilt from summed totals / counts, never averaged averages.
   const csat = section(async () => {
     const surveyId = process.env.CSAT_SURVEY_ID ?? "CX-CSAT";
-    const byCsm = rollupByCsm(await rows<"rating_total" | "responses">(CSAT_SOQL(surveyId, windowStart, windowEnd)), ["rating_total", "responses"]);
+    const byCsm = rollupByCsm(await rows<"rating_total" | "responses">(CSAT_SOQL(surveyId, windowStart, windowEnd)), ["rating_total", "responses"], by);
     return [...byCsm.values()]
       .filter(({ responses }) => responses > 0)
       .map(({ name, rating_total, responses }) => {
@@ -428,6 +445,7 @@ export async function getBonusMetrics(windowStart: string, windowEnd: string): P
     csat: await csat,
     windowStart,
     windowEnd,
+    attribution: by,
     generatedAt: new Date().toISOString(),
     source: "salesforce",
   };

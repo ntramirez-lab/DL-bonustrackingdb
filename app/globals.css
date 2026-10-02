@@ -248,7 +248,43 @@ a {
   filter: brightness(0.96);
 }
 
+.view-switch {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 18px;
+}
+
+.view-label {
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-muted);
+}
+
 /* --- Bands (alternating white / lavender sections) ---------------------- */
+
+.period-head {
+  padding: 40px 0 0;
+}
+
+.period-head .band-sub {
+  margin-bottom: 0;
+}
+
+.period-head .band-sub strong {
+  color: var(--dl-ink);
+}
+
+.period-head h2 {
+  margin: 0;
+  font-size: 26px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  color: var(--dl-ink);
+}
 
 .band {
   padding: 48px 0;
@@ -433,6 +469,44 @@ a {
 .note ul {
   margin: 8px 0 0;
   padding-left: 18px;
+}
+
+/* --- Table ------------------------------------------------------------- */
+
+.table-wrap {
+  overflow-x: auto;
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 15px;
+}
+
+.table th {
+  text-align: left;
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-muted);
+  padding: 0 12px 12px;
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+}
+
+.table td {
+  padding: 14px 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+.table .num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.table .muted {
+  color: var(--text-muted);
 }
 
 /* --- Footer ------------------------------------------------------------- */
