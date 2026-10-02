@@ -1,5 +1,13 @@
-import { getBonusMetrics, type Attribution, type BonusMetrics, type CsmMetric, type MetricSection } from "@/lib/metrics";
-import { notCountedReason, teamOf, TEAMS, type Team } from "@/lib/teams";
+import {
+  getBonusMetrics,
+  statusFor,
+  statusForLowerIsBetter,
+  type Attribution,
+  type BonusMetrics,
+  type CsmMetric,
+  type MetricSection,
+} from "@/lib/metrics";
+import { notCountedReason, POOL, rosterNames, teamOf, TEAMS, type Team } from "@/lib/teams";
 import {
   addDays,
   monthWindow,
@@ -29,14 +37,14 @@ function presets(): { label: string; window: ReportWindow }[] {
 
 const VIEWS: { id: Attribution; label: string; note: string }[] = [
   {
-    id: "assigned",
-    label: "Assigned CSM",
-    note: "Each account counts for its Vitally Assigned CSM, the permanent owner.",
+    id: "interim",
+    label: "Interim (during migration)",
+    note: "Dedicated CSMs by their Temporary CSM accounts, pooled CSMs by their Assigned CSM accounts. Everything else counts for the pool.",
   },
   {
-    id: "temporary",
-    label: "Temporary CSM (interim)",
-    note: "Each account counts for its Vitally Temporary CSM: today the dedicated team's interim books, later the pooled CSM working the account.",
+    id: "final",
+    label: "Final rule",
+    note: "Dedicated CSMs by their Assigned CSM accounts, pooled CSMs by the accounts they're working as Temporary CSM. Everything else counts for the pool.",
   },
 ];
 
@@ -59,26 +67,107 @@ function Info({ text }: { text: string }) {
 
 // --- Team split ---------------------------------------------------------------
 
-const forTeam = (s: MetricSection, team: Team): MetricSection => ({
-  error: s.error,
-  rows: s.rows.filter((r) => teamOf(r.csm) === team),
-});
+// Rows for one team. Count metrics (churn, net conversions) list every roster
+// member, with 0 for anyone who had no records — a CSM with zero churn should
+// read "0, on track", not disappear. Ratio metrics with no records stay
+// missing (there's nothing to divide).
+function forTeam(
+  s: MetricSection,
+  team: Team,
+  zeroFill?: { target: number; lowerIsBetter?: boolean }
+): MetricSection {
+  const rows = s.rows.filter((r) => teamOf(r.csm) === team);
+  if (zeroFill && !s.error) {
+    const present = new Set(rows.map((r) => r.csm.toLowerCase()));
+    for (const csm of members(team)) {
+      if (present.has(csm.toLowerCase())) continue;
+      const status = zeroFill.lowerIsBetter ? statusForLowerIsBetter(0, zeroFill.target) : statusFor(0, zeroFill.target);
+      rows.push({ csm, value: 0, target: zeroFill.target, status });
+    }
+    rows.sort((a, b) => a.csm.localeCompare(b.csm));
+  }
+  return { error: s.error, rows };
+}
 
-// Every name with data that isn't on a team roster, with what's attributed to
-// them, so the team can clean up assignments in Salesforce.
-function notCounted(m: BonusMetrics) {
-  const out = new Map<string, { reason: string; accounts: number; churned: number; cancellations: number }>();
-  const touch = (name: string) => {
-    const row = out.get(name) ?? { reason: notCountedReason(name), accounts: 0, churned: 0, cancellations: 0 };
-    out.set(name, row);
-    return row;
-  };
-  for (const r of m.qbrCoverage.rows) if (!teamOf(r.csm)) touch(r.csm).accounts += r.parts?.den ?? 0;
-  for (const r of m.logoChurn.rows) if (!teamOf(r.csm)) touch(r.csm).churned += r.value;
-  for (const r of m.saveRate.rows) if (!teamOf(r.csm)) touch(r.csm).cancellations += r.parts?.den ?? 0;
-  for (const s of [m.netConversions, m.nps, m.csat]) for (const r of s.rows) if (!teamOf(r.csm)) touch(r.csm);
-  return [...out].sort(([a], [b]) =>
-    a === "Unassigned" ? -1 : b === "Unassigned" ? 1 : a.localeCompare(b)
+// Roster plus, for the pooled team, the pool row (accounts with no team CSM).
+const members = (team: Team) => (team === "pooled" ? [...rosterNames(team), POOL] : rosterNames(team));
+
+// --- Scorecard (one row per CSM, one column per KPI) -------------------------
+
+const SCORECARD: {
+  key: "logoChurn" | "netConversions" | "qbrCoverage" | "nps" | "saveRate" | "csat";
+  label: string;
+  unit?: string;
+  decimals?: number;
+  targetPrefix?: string;
+}[] = [
+  { key: "logoChurn", label: "Logo churn", targetPrefix: "max " },
+  { key: "netConversions", label: "Net monthly → annual" },
+  { key: "qbrCoverage", label: "QBR coverage", unit: "%" },
+  { key: "nps", label: "NPS" },
+  { key: "saveRate", label: "Save rate", unit: "%" },
+  { key: "csat", label: "CSAT", decimals: 1 },
+];
+
+function Scorecard({ team, m }: { team: Team; m: BonusMetrics }) {
+  return (
+    <section className="panel">
+      <h3>
+        Scorecard <Info text="Each CSM's value for every KPI in the period, against its target. — means no records to measure (e.g. no surveys or cancellation requests)." />
+      </h3>
+      <div className="table-wrap">
+        <table className="table scorecard">
+          <thead>
+            <tr>
+              <th>CSM</th>
+              {SCORECARD.map((c) => (
+                <th key={c.key} className="num">
+                  {c.label}
+                  <span className="th-target">
+                    target {c.targetPrefix ?? ""}
+                    {m.targets[c.key].toFixed(c.decimals ?? 0)}
+                    {c.unit ?? ""}
+                  </span>
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {members(team).map((csm) => (
+              <tr key={csm}>
+                <td>{csm}</td>
+                {SCORECARD.map((c) => {
+                  const section = m[c.key];
+                  if (section.error)
+                    return (
+                      <td key={c.key} className="num muted" title={section.error}>
+                        error
+                      </td>
+                    );
+                  const row = section.rows.find((r) => r.csm.toLowerCase() === csm.toLowerCase());
+                  if (!row)
+                    return (
+                      <td key={c.key} className="num muted">
+                        —
+                      </td>
+                    );
+                  return (
+                    <td key={c.key} className="num">
+                      <span className={`score status-${row.status}`} title={`${STATUS_LABEL[row.status]}${row.detail ? ` · ${row.detail}` : ""}`}>
+                        <span className="status-dot" aria-hidden="true" />
+                        {row.value.toFixed(c.decimals ?? 0)}
+                        {c.unit ?? ""}
+                      </span>
+                      {row.detail && <span className="cell-detail">{row.detail}</span>}
+                    </td>
+                  );
+                })}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </section>
   );
 }
 
@@ -194,18 +283,19 @@ function Panel({
   );
 }
 
-function TeamBand({ label, m, tint }: { label: string; m: BonusMetrics; tint: boolean }) {
+function TeamBand({ team, label, m, tint }: { team: Team; label: string; m: BonusMetrics; tint: boolean }) {
   return (
     <section className={`band${tint ? " band-tint" : ""}`}>
       <div className="wrap">
         <h2>{label}</h2>
-        <p className="band-sub">Team totals for the period, then each CSM against their target.</p>
+        <p className="band-sub">Team totals for the period, a scorecard of every KPI by CSM, then the detail per KPI.</p>
         <div className="kpi-grid">
           {teamSummary(m).map((s) => (
             <SummaryCard key={s.label} s={s} />
           ))}
         </div>
         <div className="panels">
+          <Scorecard team={team} m={m} />
           <Panel
             title="Logo churn"
             info="Accounts whose Stripe subscription was canceled in the period, credited to the account's current CSM in this view. Lower is better."
@@ -254,7 +344,7 @@ const one = (v: string | string[] | undefined) => (Array.isArray(v) ? v[0] : v);
 
 export default async function DashboardPage({ searchParams }: { searchParams: SearchParams }) {
   const params = await searchParams;
-  const by: Attribution = one(params.by) === "temporary" ? "temporary" : "assigned";
+  const by: Attribution = one(params.by) === "final" ? "final" : "interim";
   const { windowStart, windowEnd } = resolveWindow({
     from: one(params.from),
     to: one(params.to),
@@ -268,12 +358,11 @@ export default async function DashboardPage({ searchParams }: { searchParams: Se
     ({ window }) => window.windowStart === windowStart && window.windowEnd === windowEnd
   );
   const view = VIEWS.find((v) => v.id === by)!;
-  const leftover = notCounted(metrics);
 
   const team = (t: Team): BonusMetrics => ({
     ...metrics,
-    logoChurn: forTeam(metrics.logoChurn, t),
-    netConversions: forTeam(metrics.netConversions, t),
+    logoChurn: forTeam(metrics.logoChurn, t, { target: metrics.targets.logoChurn, lowerIsBetter: true }),
+    netConversions: forTeam(metrics.netConversions, t, { target: metrics.targets.netConversions }),
     qbrCoverage: forTeam(metrics.qbrCoverage, t),
     nps: forTeam(metrics.nps, t),
     saveRate: forTeam(metrics.saveRate, t),
@@ -293,7 +382,7 @@ export default async function DashboardPage({ searchParams }: { searchParams: Se
           <h1>CSM Bonus Tracking</h1>
           <p className="lede">
             How the dedicated and pooled teams are tracking against the bonus KPIs: logo churn, monthly → annual
-            conversions, QBR coverage, NPS, save rate and CSAT. Pick a period and which CSM field to count by.
+            conversions, QBR coverage, NPS, save rate and CSAT. Pick a period and which assignment rule to use.
           </p>
 
           <nav className="pills" aria-label="Reporting period">
@@ -331,8 +420,8 @@ export default async function DashboardPage({ searchParams }: { searchParams: Se
           </details>
 
           <div className="view-switch">
-            <span className="view-label">Count accounts by</span>
-            <nav className="pills" aria-label="CSM field">
+            <span className="view-label">Assignment rule</span>
+            <nav className="pills" aria-label="Assignment rule">
               {VIEWS.map((v) => (
                 <a
                   key={v.id}
@@ -370,40 +459,37 @@ export default async function DashboardPage({ searchParams }: { searchParams: Se
         </div>
 
         {TEAMS.map((t, i) => (
-          <TeamBand key={t.id} label={t.label} m={team(t.id)} tint={i % 2 === 1} />
+          <TeamBand key={t.id} team={t.id} label={t.label} m={team(t.id)} tint={i % 2 === 1} />
         ))}
 
         <section className="band">
           <div className="wrap">
-            <h2>Not counted</h2>
+            <h2>Assignments to clean up</h2>
             <p className="band-sub">
-              Accounts and records attributed to someone outside the dedicated and pooled rosters. They don&apos;t
-              count toward either team. Anyone here besides “Unassigned” is an assignment to clean up in
-              Salesforce.
+              Active accounts whose Assigned or Temporary CSM is someone outside the dedicated and pooled teams. They
+              count for the pool until they&apos;re reassigned in Salesforce.
             </p>
             <section className="panel">
-              {leftover.length === 0 ? (
-                <div className="note">Everything in this period is attributed to a team member.</div>
+              {metrics.cleanup.length === 0 ? (
+                <div className="note">No active accounts are assigned to anyone outside the two teams.</div>
               ) : (
                 <div className="table-wrap">
                   <table className="table">
                     <thead>
                       <tr>
                         <th>Name</th>
-                        <th>Why it&apos;s not counted</th>
-                        <th className="num">Active accounts</th>
-                        <th className="num">Churned in period</th>
-                        <th className="num">Cancellation requests</th>
+                        <th>Why</th>
+                        <th className="num">As Assigned CSM</th>
+                        <th className="num">As Temporary CSM</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {leftover.map(([name, r]) => (
-                        <tr key={name}>
-                          <td>{name}</td>
-                          <td className="muted">{r.reason}</td>
-                          <td className="num">{r.accounts.toLocaleString()}</td>
-                          <td className="num">{r.churned.toLocaleString()}</td>
-                          <td className="num">{r.cancellations.toLocaleString()}</td>
+                      {metrics.cleanup.map((r) => (
+                        <tr key={r.name}>
+                          <td>{r.name}</td>
+                          <td className="muted">{notCountedReason(r.name)}</td>
+                          <td className="num">{r.assigned.toLocaleString()}</td>
+                          <td className="num">{r.temporary.toLocaleString()}</td>
                         </tr>
                       ))}
                     </tbody>

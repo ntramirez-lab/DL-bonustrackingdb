@@ -49,7 +49,9 @@ export function yearToDateWindow(now = new Date()): ReportWindow {
 
 // Precedence: ?from=YYYY-MM-DD with ?through=YYYY-MM-DD (INCLUSIVE, what the
 // date picker sends) or ?to=YYYY-MM-DD (exclusive, kept for API callers);
-// otherwise ?quarter=-1 picks the previous quarter; default is quarter-to-date.
+// otherwise ?quarter=0 is quarter-to-date, -1 the previous quarter. Default is
+// the LAST FULL quarter: quarter-to-date is nearly empty for the first weeks
+// of every quarter.
 // A range whose start isn't before its end falls back to the quarter.
 export function resolveWindow(params: {
   from?: string | null;
@@ -57,7 +59,8 @@ export function resolveWindow(params: {
   through?: string | null;
   quarter?: string | null;
 }): ReportWindow {
-  const base = quarterWindow(Number.parseInt(params.quarter ?? "0", 10) || 0);
+  const offset = Number.parseInt(params.quarter ?? "-1", 10);
+  const base = quarterWindow(Number.isNaN(offset) ? -1 : offset);
   const windowStart = isDate(params.from) ? params.from : base.windowStart;
   const windowEnd = isDate(params.through)
     ? addDays(params.through, 1)
