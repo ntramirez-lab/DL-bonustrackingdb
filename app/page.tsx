@@ -1,4 +1,5 @@
 import {
+  defaultAttribution,
   getBonusMetrics,
   statusFor,
   statusForLowerIsBetter,
@@ -37,18 +38,24 @@ function presets(): { label: string; window: ReportWindow }[] {
 
 const VIEWS: { id: Attribution; label: string; note: string }[] = [
   {
-    id: "interim",
-    label: "Interim (during migration)",
-    note: "Dedicated CSMs by their Temporary CSM accounts, pooled CSMs by their Assigned CSM accounts. Everything else counts for the pool.",
+    id: "final",
+    label: "Dedicated by Assigned CSM (Q3 & final)",
+    note: "Dedicated CSMs by their Assigned CSM accounts, pooled CSMs by the accounts they're working as Temporary CSM. Everything else counts for the pool. Used for Q3 and earlier, and for everything once owners move to Assigned CSM.",
   },
   {
-    id: "final",
-    label: "Final rule",
-    note: "Dedicated CSMs by their Assigned CSM accounts, pooled CSMs by the accounts they're working as Temporary CSM. Everything else counts for the pool.",
+    id: "interim",
+    label: "Dedicated by Temporary CSM (Q4 interim)",
+    note: "Dedicated CSMs by their new Temporary CSM books, pooled CSMs by their Assigned CSM accounts. Everything else counts for the pool. Used from Q4 until owners move to Assigned CSM.",
   },
 ];
 
-const href = (from: string, through: string, by: Attribution) => `?from=${from}&through=${through}&by=${by}`;
+// `by` is only carried when the viewer picked a rule; otherwise each period
+// gets its default rule (see defaultAttribution).
+const href = (from: string, through: string, by: Attribution | null) =>
+  `?from=${from}&through=${through}${by ? `&by=${by}` : ""}`;
+
+const usd = (n: number) =>
+  n.toLocaleString("en-US", { style: "currency", currency: "USD", notation: n >= 10_000 ? "compact" : "standard", maximumFractionDigits: n >= 10_000 ? 1 : 0 });
 
 const STATUS_LABEL: Record<CsmMetric["status"], string> = {
   good: "On track",
@@ -74,7 +81,7 @@ function Info({ text }: { text: string }) {
 function forTeam(
   s: MetricSection,
   team: Team,
-  zeroFill?: { target: number; lowerIsBetter?: boolean }
+  zeroFill?: { target: number; lowerIsBetter?: boolean; arr?: boolean }
 ): MetricSection {
   const rows = s.rows.filter((r) => teamOf(r.csm) === team);
   if (zeroFill && !s.error) {
@@ -82,7 +89,7 @@ function forTeam(
     for (const csm of members(team)) {
       if (present.has(csm.toLowerCase())) continue;
       const status = zeroFill.lowerIsBetter ? statusForLowerIsBetter(0, zeroFill.target) : statusFor(0, zeroFill.target);
-      rows.push({ csm, value: 0, target: zeroFill.target, status });
+      rows.push({ csm, value: 0, target: zeroFill.target, status, ...(zeroFill.arr ? { arr: 0 } : {}) });
     }
     rows.sort((a, b) => a.csm.localeCompare(b.csm));
   }
@@ -159,6 +166,7 @@ function Scorecard({ team, m }: { team: Team; m: BonusMetrics }) {
                         {c.unit ?? ""}
                       </span>
                       {row.detail && <span className="cell-detail">{row.detail}</span>}
+                      {row.arr !== undefined && <span className="cell-detail">{usd(row.arr)} ARR</span>}
                     </td>
                   );
                 })}
@@ -197,7 +205,9 @@ function teamSummary(m: Record<"logoChurn" | "netConversions" | "qbrCoverage" | 
     {
       label: "Logo churn",
       value: unavailable(m.logoChurn) ? "—" : sum(m.logoChurn).toLocaleString(),
-      sub: "accounts canceled (lower is better)",
+      sub: unavailable(m.logoChurn)
+        ? "accounts canceled (lower is better)"
+        : `accounts canceled · ${usd(m.logoChurn.rows.reduce((acc, r) => acc + (r.arr ?? 0), 0))} ARR lost`,
       tone: "navy",
     },
     {
@@ -232,6 +242,7 @@ function Tile({ metric, unit = "", decimals = 0 }: { metric: CsmMetric; unit?: s
         {unit}
       </span>
       {metric.detail && <span className="tile-meta">{metric.detail}</span>}
+      {metric.arr !== undefined && <span className="tile-meta">{usd(metric.arr)} ARR lost</span>}
       {metric.target !== undefined && (
         <span className="tile-meta">
           target {metric.target.toFixed(decimals)}
@@ -298,7 +309,7 @@ function TeamBand({ team, label, m, tint }: { team: Team; label: string; m: Bonu
           <Scorecard team={team} m={m} />
           <Panel
             title="Logo churn"
-            info="Accounts whose Stripe subscription was canceled in the period, credited to the account's current CSM in this view. Lower is better."
+            info="Accounts whose Stripe subscription was canceled in the period, credited to the account's current CSM under this rule, with their total ARR (core + AI, after coupons). Lower is better."
             section={m.logoChurn}
           />
           <Panel
@@ -344,7 +355,8 @@ const one = (v: string | string[] | undefined) => (Array.isArray(v) ? v[0] : v);
 
 export default async function DashboardPage({ searchParams }: { searchParams: SearchParams }) {
   const params = await searchParams;
-  const by: Attribution = one(params.by) === "final" ? "final" : "interim";
+  const picked = one(params.by);
+  const explicitBy: Attribution | null = picked === "final" || picked === "interim" ? picked : null;
   const { windowStart, windowEnd } = resolveWindow({
     from: one(params.from),
     to: one(params.to),
@@ -352,6 +364,7 @@ export default async function DashboardPage({ searchParams }: { searchParams: Se
     quarter: one(params.quarter),
   });
   const through = addDays(windowEnd, -1);
+  const by = explicitBy ?? defaultAttribution(windowStart);
   const metrics = await getBonusMetrics(windowStart, windowEnd, by);
   const live = metrics.source === "salesforce";
   const activePreset = presets().find(
@@ -361,7 +374,7 @@ export default async function DashboardPage({ searchParams }: { searchParams: Se
 
   const team = (t: Team): BonusMetrics => ({
     ...metrics,
-    logoChurn: forTeam(metrics.logoChurn, t, { target: metrics.targets.logoChurn, lowerIsBetter: true }),
+    logoChurn: forTeam(metrics.logoChurn, t, { target: metrics.targets.logoChurn, lowerIsBetter: true, arr: true }),
     netConversions: forTeam(metrics.netConversions, t, { target: metrics.targets.netConversions }),
     qbrCoverage: forTeam(metrics.qbrCoverage, t),
     nps: forTeam(metrics.nps, t),
@@ -392,7 +405,7 @@ export default async function DashboardPage({ searchParams }: { searchParams: Se
                 <a
                   key={label}
                   className={`pill${active ? " pill-active" : ""}`}
-                  href={href(window.windowStart, addDays(window.windowEnd, -1), by)}
+                  href={href(window.windowStart, addDays(window.windowEnd, -1), explicitBy)}
                   aria-current={active ? "true" : undefined}
                 >
                   {label}
@@ -404,7 +417,7 @@ export default async function DashboardPage({ searchParams }: { searchParams: Se
           <details className="range" open={!activePreset}>
             <summary>Pick specific dates</summary>
             <form className="range-form" method="get">
-              <input type="hidden" name="by" value={by} />
+              {explicitBy && <input type="hidden" name="by" value={explicitBy} />}
               <label>
                 From
                 <input type="date" name="from" defaultValue={windowStart} max={through} required />
@@ -454,6 +467,7 @@ export default async function DashboardPage({ searchParams }: { searchParams: Se
             </h2>
             <p className="band-sub">
               <strong>{view.label}.</strong> {view.note}
+              {!explicitBy && " Picked automatically for this period."}
             </p>
           </div>
         </div>

@@ -14,6 +14,8 @@ export interface CsmMetric {
   // Raw numerator/denominator behind a ratio metric, so team totals can be
   // pooled (sum of parts) instead of averaging per-CSM percentages.
   parts?: { num: number; den: number };
+  // Dollar amount behind the metric, e.g. ARR lost to churn.
+  arr?: number;
   status: "good" | "warning" | "serious" | "critical";
 }
 
@@ -82,6 +84,15 @@ const dt = (date: string) => `${date}T00:00:00Z`;
 // SOQL can't COALESCE inside GROUP BY, so each query groups by both lookups
 // and attributedCsm() picks the owner per row.
 export type Attribution = "interim" | "final";
+
+// Which rule fits a period when the viewer hasn't picked one (Natalia,
+// 2026-10-02): Q3 2026 and earlier are paid on the dedicated CSMs' Assigned
+// CSM books ("final" rule). From Q4 the new dedicated books live in Temporary
+// CSM until owners move to Assigned after the Q3 bonus is calculated
+// ("interim"). Once that move happens, default everything to "final".
+export const INTERIM_STARTS = "2026-10-01";
+export const defaultAttribution = (windowStart: string): Attribution =>
+  windowStart < INTERIM_STARTS ? "final" : "interim";
 
 const CSM_GROUP = (path: string) =>
   [
@@ -153,11 +164,13 @@ export function rollupByCsm<K extends string>(
   return out;
 }
 
+// ARR lost = SUM(Combined_Stripe_Subscription_ARR_AC__c): total ARR (core +
+// AI) after coupons, as last synced from Stripe for the canceled account.
 // 1. Logo churn per CSM — accounts whose Stripe subscription was canceled in
 // the window, grouped by the CSM who owned them. "Locked as of Oct 1" =
 // Stripe_Subscription_Canceled_At__c populated (per Alfredo/Santi, 2026-09-28).
 const LOGO_CHURN_SOQL = (windowStart: string, windowEnd: string) => `
-  SELECT ${CSM_SELECT("")}, COUNT(Id) churned
+  SELECT ${CSM_SELECT("")}, COUNT(Id) churned, SUM(Combined_Stripe_Subscription_ARR_AC__c) arr
   FROM Account
   WHERE Stripe_Subscription_Canceled_At__c >= ${dt(windowStart)}
     AND Stripe_Subscription_Canceled_At__c < ${dt(windowEnd)}
@@ -330,7 +343,9 @@ function mockMetrics(windowStart: string, windowEnd: string, by: Attribution): B
 
   const churn = mk(2, 0.15);
   return {
-    logoChurn: { rows: churn.rows.map((m) => ({ ...m, status: statusForLowerIsBetter(m.value, m.target!) })) },
+    logoChurn: {
+      rows: churn.rows.map((m) => ({ ...m, arr: m.value * 2_340, status: statusForLowerIsBetter(m.value, m.target!) })),
+    },
     netConversions: mk(10, 0.12),
     qbrCoverage: {
       rows: csms.map((csm, i) => {
@@ -397,10 +412,11 @@ export async function getBonusMetrics(
   const t = targets();
 
   const logoChurn = section(async () => {
-    const byCsm = rollupByCsm(await rows<"churned">(LOGO_CHURN_SOQL(windowStart, windowEnd)), ["churned"], by);
-    return [...byCsm.values()].map(({ name, churned }) => ({
+    const byCsm = rollupByCsm(await rows<"churned" | "arr">(LOGO_CHURN_SOQL(windowStart, windowEnd)), ["churned", "arr"], by);
+    return [...byCsm.values()].map(({ name, churned, arr }) => ({
       csm: name,
       value: churned,
+      arr,
       target: t.logoChurn,
       status: statusForLowerIsBetter(churned, t.logoChurn),
     }));
