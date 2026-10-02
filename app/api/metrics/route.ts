@@ -14,7 +14,8 @@ export async function GET(request: Request) {
   });
 
   try {
-    const metrics = await getBonusMetrics(windowStart, windowEnd);
+    const by = searchParams.get("by") === "temporary" ? "temporary" : "assigned";
+    const metrics = await getBonusMetrics(windowStart, windowEnd, by);
     return NextResponse.json(metrics);
   } catch (err) {
     return NextResponse.json(
