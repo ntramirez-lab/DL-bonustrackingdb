@@ -3,6 +3,7 @@
 // confirmed against the salesforce repo's metadata (force-app/main/default/objects)
 // as of GTM-2496 — re-verify against that repo if these objects change.
 import { soqlQuery, usingMockData } from "./salesforce";
+import { POOL, teamOf } from "./teams";
 
 export interface CsmMetric {
   csm: string;
@@ -34,11 +35,13 @@ export interface BonusMetrics {
   windowStart: string;
   windowEnd: string;
   attribution: Attribution;
+  targets: Targets;
+  cleanup: CleanupRow[];
   generatedAt: string;
   source: "salesforce" | "mock";
 }
 
-function statusFor(value: number, target: number): CsmMetric["status"] {
+export function statusFor(value: number, target: number): CsmMetric["status"] {
   const pct = target === 0 ? 1 : value / target;
   if (pct >= 1) return "good";
   if (pct >= 0.85) return "warning";
@@ -49,7 +52,7 @@ function statusFor(value: number, target: number): CsmMetric["status"] {
 // For metrics where LOWER is better (e.g. logo churn count vs. a cap) —
 // meeting or beating the cap is "good"; status only degrades once value
 // exceeds target.
-function statusForLowerIsBetter(value: number, target: number): CsmMetric["status"] {
+export function statusForLowerIsBetter(value: number, target: number): CsmMetric["status"] {
   if (value <= target) return "good";
   const pct = target / value;
   if (pct >= 0.85) return "warning";
@@ -64,16 +67,21 @@ function statusForLowerIsBetter(value: number, target: number): CsmMetric["statu
 // (NPS_Score__c.Date__c, Requested_On__c) take the YYYY-MM-DD form as-is.
 const dt = (date: string) => `${date}T00:00:00Z`;
 
-// CSM attribution (Natalia, 2026-10-02): the dashboard has two views, each
-// using ONE lookup with no fallback between them:
-//   - "assigned": Account.Vitally_Assigned_CSM__c — the permanent owner, where
-//     every assignment is headed.
-//   - "temporary": Account.Vitally_Temporary_CSM__c — today holds the dedicated
-//     CSMs' interim books; later it marks which pooled CSM is working an account.
+// CSM attribution (Natalia, 2026-10-02). One rule per account, in two
+// flavours while assignments migrate:
+//   - "final" (target model): the Vitally Assigned CSM if they're on the
+//     DEDICATED team; otherwise the Vitally Temporary CSM if they're on the
+//     POOLED team (a pooled CSM working the account); otherwise the pool.
+//   - "interim" (today, mid-migration): the dedicated team's books still live
+//     in Temporary CSM and the pooled CSMs' in Assigned CSM, so the fields
+//     swap — Temporary if dedicated, else Assigned if pooled, else the pool.
+// "The pool" = the pooled team as a whole (no individual CSM), which also
+// absorbs accounts whose field holds someone not on a team (leadership,
+// former staff…); those are listed separately as cleanup.
 // Churn counts for the account's current CSM (Previous_CSM__c not used).
 // SOQL can't COALESCE inside GROUP BY, so each query groups by both lookups
-// and attributedCsm() picks the owner per row for the chosen view.
-export type Attribution = "assigned" | "temporary";
+// and attributedCsm() picks the owner per row.
+export type Attribution = "interim" | "final";
 
 const CSM_GROUP = (path: string) =>
   [
@@ -94,8 +102,37 @@ interface CsmAttributedRow {
 }
 
 export function attributedCsm(row: CsmAttributedRow, by: Attribution): { id: string; name: string } {
-  const [id, name] = by === "assigned" ? [row.csmId, row.csmName] : [row.tmpId, row.tmpName];
-  return id ? { id, name: name ?? id } : { id: "unassigned", name: "Unassigned" };
+  const assigned = { id: row.csmId, name: row.csmName };
+  const temporary = { id: row.tmpId, name: row.tmpName };
+  const [dedicatedField, pooledField] = by === "final" ? [assigned, temporary] : [temporary, assigned];
+  if (dedicatedField.id && dedicatedField.name && teamOf(dedicatedField.name) === "dedicated")
+    return { id: dedicatedField.id, name: dedicatedField.name };
+  if (pooledField.id && pooledField.name && teamOf(pooledField.name) === "pooled")
+    return { id: pooledField.id, name: pooledField.name };
+  return { id: "pool", name: POOL };
+}
+
+// Active accounts whose Assigned/Temporary CSM is someone not on either team.
+// They count for the pool, but the assignment itself needs cleaning up.
+export interface CleanupRow {
+  name: string;
+  assigned: number;
+  temporary: number;
+}
+
+function cleanupFromBook(book: (CsmAttributedRow & { accounts: number | null })[]): CleanupRow[] {
+  const out = new Map<string, CleanupRow>();
+  const add = (name: string | null | undefined, field: "assigned" | "temporary", n: number) => {
+    if (!name || teamOf(name)) return;
+    const row = out.get(name) ?? { name, assigned: 0, temporary: 0 };
+    row[field] += n;
+    out.set(name, row);
+  };
+  for (const r of book) {
+    add(r.csmName, "assigned", r.accounts ?? 0);
+    add(r.tmpName, "temporary", r.accounts ?? 0);
+  }
+  return [...out.values()].sort((a, b) => a.name.localeCompare(b.name));
 }
 
 // Collapses grouped-aggregate rows onto their attributed CSM, summing the
@@ -262,7 +299,7 @@ const DEFAULT_TARGETS = {
   saveRate: 60,
   csat: 4.5,
 };
-type Targets = typeof DEFAULT_TARGETS;
+export type Targets = typeof DEFAULT_TARGETS;
 
 function targets(): Targets {
   const raw = process.env.BONUS_TARGETS;
@@ -277,12 +314,13 @@ function targets(): Targets {
 // --- Mock data (default until the read-only integration user exists) ----
 
 function mockMetrics(windowStart: string, windowEnd: string, by: Attribution): BonusMetrics {
-  // Real roster names so the dedicated/pooled split renders; the temporary
-  // view only has the dedicated team (that's who holds interim books today).
+  const t = targets();
+  // Real roster names so the dedicated/pooled split renders. In the final
+  // view pooled CSMs only hold accounts they're actively working.
   const csms =
-    by === "temporary"
-      ? ["Anna Grouzdev", "Austin Leyba", "Sahil Saini", "Tiffany Figueroa"]
-      : ["Anna Grouzdev", "Austin Leyba", "Guillermo Celta", "Jeremy Galvez", "Nestor Ramirez", "Unassigned"];
+    by === "interim"
+      ? ["Anna Grouzdev", "Austin Leyba", "Sahil Saini", "Tiffany Figueroa", "Guillermo Celta", "Jeremy Galvez", "Nestor Ramirez", POOL]
+      : ["Anna Grouzdev", "Austin Leyba", "Sahil Saini", "Tiffany Figueroa", "Guillermo Celta", POOL];
   const mk = (target: number, spread: number): MetricSection => ({
     rows: csms.map((csm, i) => {
       const value = Math.round(target * (0.7 + spread * i));
@@ -316,6 +354,11 @@ function mockMetrics(windowStart: string, windowEnd: string, by: Attribution): B
     windowStart,
     windowEnd,
     attribution: by,
+    targets: t,
+    cleanup: [
+      { name: "Miah Camacho", assigned: 12, temporary: 0 },
+      { name: "Jeremy Keillor", assigned: 1, temporary: 0 },
+    ],
     generatedAt: new Date().toISOString(),
     source: "mock",
   };
@@ -325,10 +368,11 @@ function mockMetrics(windowStart: string, windowEnd: string, by: Attribution): B
 
 type Row<K extends string> = CsmAttributedRow & Record<K, number | null>;
 
-// "Unassigned" sorts last; everyone else alphabetically.
+// The pool and "Unassigned" sort last; everyone else alphabetically.
+const LAST = new Set([POOL, "Unassigned"]);
 function sortRows(rows: CsmMetric[]): CsmMetric[] {
   return rows.sort((a, b) =>
-    a.csm === "Unassigned" ? 1 : b.csm === "Unassigned" ? -1 : a.csm.localeCompare(b.csm)
+    LAST.has(a.csm) !== LAST.has(b.csm) ? (LAST.has(a.csm) ? 1 : -1) : a.csm.localeCompare(b.csm)
   );
 }
 
@@ -347,7 +391,7 @@ async function rows<K extends string>(soql: string): Promise<Row<K>[]> {
 export async function getBonusMetrics(
   windowStart: string,
   windowEnd: string,
-  by: Attribution = "assigned"
+  by: Attribution = "interim"
 ): Promise<BonusMetrics> {
   if (usingMockData()) return mockMetrics(windowStart, windowEnd, by);
   const t = targets();
@@ -377,9 +421,11 @@ export async function getBonusMetrics(
     }));
   });
 
+  const bookRows = rows<"accounts">(BOOK_SIZE_SOQL);
+  const cleanup = bookRows.then(cleanupFromBook).catch(() => [] as CleanupRow[]);
   const qbrCoverage = section(async () => {
     const [book, covered] = await Promise.all([
-      rows<"accounts">(BOOK_SIZE_SOQL),
+      bookRows,
       rows<"covered">(QBR_COVERAGE_SOQL(windowStart, windowEnd)),
     ]);
     return qbrCoverageRows(rollupByCsm(book, ["accounts"], by), rollupByCsm(covered, ["covered"], by), t.qbrCoverage);
@@ -446,6 +492,8 @@ export async function getBonusMetrics(
     windowStart,
     windowEnd,
     attribution: by,
+    targets: t,
+    cleanup: await cleanup,
     generatedAt: new Date().toISOString(),
     source: "salesforce",
   };

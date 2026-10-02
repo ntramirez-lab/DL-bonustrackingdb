@@ -38,11 +38,15 @@ export const TEAMS: { id: Team; label: string }[] = [
   { id: "pooled", label: "Pooled team" },
 ];
 
-export const teamOf = (name: string): Team | null => TEAM_OF.get(key(name)) ?? null;
+// Accounts with no team CSM in the field that applies belong to the pooled
+// team as a whole. They show up as this one row.
+export const POOL = "Pool (no CSM)";
 
-// Why a name isn't on a team: a known group, "Unassigned", or "Not on a team".
+export const teamOf = (name: string): Team | null =>
+  name === POOL ? "pooled" : (TEAM_OF.get(key(name)) ?? null);
+
+// Why a name holding accounts isn't on a team: a known group or "Not on a team".
 export function notCountedReason(name: string): string {
-  if (name === "Unassigned") return "No CSM in this field";
   return GROUP_OF.get(key(name)) ?? "Not on a team roster";
 }
 
